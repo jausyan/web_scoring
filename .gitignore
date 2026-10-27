@@ -1,0 +1,63 @@
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build & Release Outputs ──
+dist/
+dist-ssr/
+build/
+out/
+*.local
+
+# ── Environment Variables & Secrets (IMPORTANT) ──
+.env
+.env.*
+!.env.example
+*serviceAccount*.json
+*credentials*.json
+*.pem
+*.key
+
+# ── Runtime Score Data & Exports ──
+data/*.json
+!data/.gitkeep
+scores.json
+*.csv
+
+# ── Firebase & Netlify ──
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.netlify/
+
+# ── Caches & Temporary Files ──
+.vite/
+.cache/
+.temp/
+.tmp/
+coverage/
+.nyc_output/
+
+# ── Logs ──
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Editors & OS ──
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+.DS_Store
+Thumbs.db
