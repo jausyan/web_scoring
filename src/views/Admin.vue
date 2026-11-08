@@ -3,7 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLive } from '../stores/live'
 import { useAuth } from '../stores/auth'
-import { rankTeams, fmtDelta } from '../lib/ranking'
+import {
+  rankTeams,
+  fmtDelta,
+  findTiedGroups,
+  computeFinalPodium,
+} from '../lib/ranking'
 import { SCREENS } from '../lib/defaultState'
 import * as A from '../lib/actions'
 import {
@@ -30,31 +35,129 @@ const lastText = computed(() => {
   return `${t?.name ?? e.teamId} ${fmtDelta(e.delta)}`
 })
 
-/* ---- final ---- */
+/* ---- Perempat Final / Finalis Selection (Items 1, 2, 4) ---- */
+const qRanked = computed(() => rankTeams(state.value.quarter.teams))
+const qTiedGroups = computed(() => findTiedGroups(state.value.quarter.teams))
+const cutoffTie = computed(() => qTiedGroups.value.find((g) => g.spansCutoff))
+
+// Selected team IDs to advance to Grand Final
+const selectedFinalists = ref([])
+
+// Initialize or update selection with top 5 by default
+function selectTop5() {
+  selectedFinalists.value = qRanked.value.slice(0, 5).map((t) => t.id)
+}
+
+watch(
+  qRanked,
+  () => {
+    if (!selectedFinalists.value.length) selectTop5()
+  },
+  { immediate: true },
+)
+
+function toggleFinalist(id) {
+  const idx = selectedFinalists.value.indexOf(id)
+  if (idx !== -1) {
+    selectedFinalists.value.splice(idx, 1)
+  } else {
+    if (selectedFinalists.value.length >= 5) {
+      alert('Maksimal 5 tim untuk Grand Final. Hilangkan centang tim lain terlebih dahulu.')
+      return
+    }
+    selectedFinalists.value.push(id)
+  }
+}
+
+function applySelectedFinalists() {
+  if (selectedFinalists.value.length !== 5) {
+    if (
+      !confirm(
+        `Anda baru memilih ${selectedFinalists.value.length} tim (idealnya 5 tim). Lanjutkan penetapan finalis?`,
+      )
+    )
+      return
+  }
+  const chosenNames = selectedFinalists.value
+    .map((id, i) => `${i + 1}. ${state.value.quarter.teams[id]?.name || id}`)
+    .join('\n')
+
+  if (
+    confirm(
+      `Tetapkan tim berikut sebagai 5 Besar Grand Final?\n\n${chosenNames}\n\nData Grand Final sebelumnya akan direset dengan tim ini.`,
+    )
+  ) {
+    A.promoteSelectedTeams(state.value, selectedFinalists.value)
+    tab.value = 'final'
+  }
+}
+
+function resolveTiePriority(teamId, delta) {
+  const t = state.value.quarter.teams[teamId]
+  const cur = Number(t?.tiePriority) || 0
+  A.setTiePriority('quarter', teamId, cur + delta)
+}
+
+/* ---- Grand Final & Winner (Item 3: Juara 1 Manual, 2 & 3 Otomatis by Point) ---- */
 const fin = computed(() => state.value.final)
-const qTop5 = computed(() => rankTeams(state.value.quarter.teams).slice(0, 5))
 const fRanked = computed(() => rankTeams(fin.value.teams))
 const target = ref(100)
-watch(() => fin.value.target, (v) => (target.value = v), { immediate: true })
-const podiumPick = ref(['', '', ''])
-function fillFromScore() { podiumPick.value = fRanked.value.slice(0, 3).map((t) => t.id) }
-watch(() => fin.value.podium, (p) => { if (p) podiumPick.value = [...p, '', '', ''].slice(0, 3); else fillFromScore() }, { immediate: true })
-const teamName = (id) => fin.value.teams?.[id]?.name ?? '—'
+watch(
+  () => fin.value.target,
+  (v) => (target.value = v),
+  { immediate: true },
+)
 
-function promote() {
-  const names = qTop5.value.map((t, i) => `${i + 1}. ${t.name} (${t.score})`).join('\n')
-  if (confirm(`Loloskan 5 besar ke Grand Final?\n\n${names}\n\nData final (skor & nama) akan diganti.`)) A.promoteTop5(state.value)
-}
-function showPodium() {
-  const ids = podiumPick.value.filter(Boolean)
-  if (new Set(ids).size !== ids.length) return alert('Satu tim tidak boleh di dua posisi podium.')
-  A.setPodium(ids).then(() => A.setScreen('final-podium'))
-}
-function crown(t) {
-  if (confirm(`Tetapkan ${t.name} sebagai PEMENANG? Mobilnya akan langsung melaju ke garis finish.`)) A.crownTeam(state.value, t.id)
+// Manual Winner Selection
+const manualWinnerId = ref('')
+watch(
+  () => fin.value.winnerManualId || fin.value.podium?.[0],
+  (id) => {
+    manualWinnerId.value = id || ''
+  },
+  { immediate: true },
+)
+
+// Computed resulting podium
+const computedPodium = computed(() => {
+  const teams = fin.value.teams || {}
+  const podiumIds = computeFinalPodium(teams, manualWinnerId.value)
+  return podiumIds.map((id, idx) => ({
+    place: idx + 1,
+    id,
+    name: teams[id]?.name || id,
+    score: Number(teams[id]?.score) || 0,
+    isManual: idx === 0 && !!manualWinnerId.value,
+  }))
+})
+
+function applyManualWinner() {
+  if (!manualWinnerId.value) {
+    return alert('Pilih salah satu tim sebagai Juara 1 terlebih dahulu.')
+  }
+  A.setManualWinner(state.value, manualWinnerId.value)
 }
 
-/* ---- export / import ---- */
+function publishPodium() {
+  if (!manualWinnerId.value && !fin.value.podium) {
+    // If admin hasn't explicitly chosen winner, auto-set from current top
+    manualWinnerId.value = fRanked.value[0]?.id || ''
+  }
+  applyManualWinner()
+  A.setScreen('final-podium')
+}
+
+function clearPodium() {
+  manualWinnerId.value = ''
+  A.setPodium(null)
+}
+
+function crownDirectly(team) {
+  manualWinnerId.value = team.id
+  A.crownTeam(state.value, team.id)
+}
+
+/* ---- Export / Import ---- */
 const jsonInput = ref(null)
 const importMsg = ref('')
 async function onImportJson(e) {
@@ -70,9 +173,13 @@ async function onImportJson(e) {
   }
 }
 
-/* ---- settings ---- */
+/* ---- Settings ---- */
 const meta = ref({ title: '', subtitle: '' })
-watch(() => state.value.meta, (m) => (meta.value = { ...m }), { immediate: true })
+watch(
+  () => state.value.meta,
+  (m) => (meta.value = { ...m }),
+  { immediate: true },
+)
 const newPin = ref('')
 const newPin2 = ref('')
 const pinMsg = ref('')
@@ -84,22 +191,42 @@ async function changePin() {
   newPin.value = newPin2.value = ''
   pinMsg.value = 'PIN berhasil diganti.'
 }
-function confirmDo(msg, fn) { if (confirm(msg)) fn() }
-async function logout() { await auth.logout(); router.push('/login') }
+function confirmDo(msg, fn) {
+  if (confirm(msg)) fn()
+}
+async function logout() {
+  await auth.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
   <div class="admin">
+    <!-- Top Bar with Official EPW Logo & Competition Name (Items 5 & 6) -->
     <header class="ah">
-      <div class="brand"><span class="logo">LCC</span> RACE CONTROL</div>
-      <span class="badge" :class="mode">{{ mode === 'firebase' ? 'ONLINE' : 'JSON LOKAL' }}</span>
+      <div class="brand">
+        <img src="/logo-epw.png" alt="EPW" class="epw-mini-logo" />
+        <span class="comp-title">{{ state.meta.title || 'LCC EPW 2026' }}</span>
+        <span class="panel-tag">PANEL JURI</span>
+      </div>
+      <span class="badge" :class="mode">{{
+        mode === 'firebase' ? 'ONLINE' : 'JSON LOKAL'
+      }}</span>
       <span class="dot" :class="{ off: !connected }" />
       <span class="grow" />
       <span class="muted email">{{ auth.user.value?.email }}</span>
-      <button class="btn sm green" @click="downloadAllScoresCsv(state)" title="Unduh semua skor dalam format CSV (Excel)">
+      <button
+        class="btn sm green"
+        @click="downloadAllScoresCsv(state)"
+        title="Unduh semua skor dalam format CSV (Excel)"
+      >
         <F1Icon name="download" :size="15" /> Unduh .CSV
       </button>
-      <button class="btn sm" @click="downloadScoresJson(state)" title="Simpan backup skor dalam format JSON">
+      <button
+        class="btn sm"
+        @click="downloadScoresJson(state)"
+        title="Simpan backup skor dalam format JSON"
+      >
         <F1Icon name="download" :size="15" /> Simpan .JSON
       </button>
       <a href="/live" target="_blank" class="btn sm">
@@ -108,10 +235,17 @@ async function logout() { await auth.logout(); router.push('/login') }
       <button class="btn sm ghost" @click="logout">Keluar</button>
     </header>
 
+    <!-- Screen Switcher Control Bar -->
     <div class="control card">
       <div class="lbl">LAYAR LIVE</div>
       <div class="screens">
-        <button v-for="(s, key) in SCREENS" :key="key" class="btn" :class="{ active: screen === key }" @click="A.setScreen(key)">
+        <button
+          v-for="(s, key) in SCREENS"
+          :key="key"
+          class="btn"
+          :class="{ active: screen === key }"
+          @click="A.setScreen(key)"
+        >
           {{ s.short }}
         </button>
       </div>
@@ -132,77 +266,278 @@ async function logout() { await auth.logout(); router.push('/login') }
       >
         <F1Icon name="download" :size="14" /> CSV Grand Final
       </button>
-      <button class="btn" :disabled="!last" @click="A.undoLast(state)" :title="lastText">
-        <F1Icon name="undo" :size="15" /> Batalkan <span v-if="last" class="muted">({{ lastText }})</span>
+      <button
+        class="btn"
+        :disabled="!last"
+        @click="A.undoLast(state)"
+        :title="lastText"
+      >
+        <F1Icon name="undo" :size="15" /> Batalkan
+        <span v-if="last" class="muted">({{ lastText }})</span>
       </button>
     </div>
 
+    <!-- Navigation Tabs -->
     <nav class="tabs">
-      <button :class="{ on: tab === 'quarter' }" @click="tab = 'quarter'">Perempat Final</button>
-      <button :class="{ on: tab === 'final' }" @click="tab = 'final'">Grand Final</button>
-      <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">Pengaturan & Ekspor</button>
+      <button :class="{ on: tab === 'quarter' }" @click="tab = 'quarter'">
+        Perempat Final
+      </button>
+      <button :class="{ on: tab === 'final' }" @click="tab = 'final'">
+        Grand Final & Juara
+      </button>
+      <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">
+        Pengaturan & Ekspor
+      </button>
     </nav>
 
-    <!-- QUARTER -->
-    <AdminStage v-if="tab === 'quarter'" stage="quarter" />
+    <!-- TAB 1: QUARTERFINAL -->
+    <template v-if="tab === 'quarter'">
+      <!-- Tie-Break Alert / Resolution Tool (Item 2) -->
+      <div v-if="cutoffTie" class="card tie-alert">
+        <div class="tie-alert-head">
+          <span class="warn-dot" />
+          <h4 class="tie-title">
+            PERHATIAN: Terdapat Skor Sama di Batas Kualifikasi P5!
+          </h4>
+        </div>
+        <p class="tie-desc">
+          Tim berikut memiliki skor sama (<b>{{ cutoffTie.score }} poin</b>) pada
+          posisi kualifikasi 5 besar. Gunakan tombol untuk menentukan keunggulan
+          tie-break:
+        </p>
+        <div class="tie-team-list">
+          <div
+            v-for="t in cutoffTie.teams"
+            :key="t.id"
+            class="tie-team-row"
+            :class="{ q: t.pos <= 5 }"
+          >
+            <span class="badge-pos">P{{ t.pos }}</span>
+            <span class="t-name">{{ t.name }}</span>
+            <span class="t-score">{{ t.score }} poin</span>
+            <span class="t-prio muted">(Prioritas: {{ t.tiePriority || 0 }})</span>
+            <div class="tie-btn-group">
+              <button
+                class="btn sm green"
+                @click="resolveTiePriority(t.id, 1)"
+                title="Naikkan posisi tim ini di atas tim yang skornya sama"
+              >
+                ▲ Unggulkan
+              </button>
+              <button
+                class="btn sm minus"
+                @click="resolveTiePriority(t.id, -1)"
+                title="Turunkan posisi tim ini"
+              >
+                ▼ Turunkan
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-    <!-- FINAL -->
+      <!-- Finalist Selector / Management: Show All Teams (Items 1 & 4) -->
+      <div class="card tool finalist-manager">
+        <div class="fm-header">
+          <div>
+            <h4>Penetapan Peserta Grand Final (5 Besar)</h4>
+            <p class="muted small">
+              Centang 5 tim yang akan bertanding di Grand Final. Tim dapat dipilih
+              otomatis berdasarkan skor atau ditentukan secara manual oleh panitia.
+            </p>
+          </div>
+          <div class="fm-actions">
+            <span class="counter" :class="{ ok: selectedFinalists.length === 5 }">
+              Terpilih: <b>{{ selectedFinalists.length }}</b> / 5 Tim
+            </span>
+            <button class="btn sm" @click="selectTop5">
+              Pilih Otomatis 5 Besar
+            </button>
+            <button
+              class="btn primary"
+              :disabled="!selectedFinalists.length"
+              @click="applySelectedFinalists"
+            >
+              <F1Icon name="flag" :size="16" /> Terapkan ke Grand Final
+            </button>
+          </div>
+        </div>
+
+        <!-- Full Table: Diliatin semua baik yg tereliminasi atau tidak (Item 4) -->
+        <div class="teams-table-scroll">
+          <table class="teams-table">
+            <thead>
+              <tr>
+                <th style="width: 50px">PILIH</th>
+                <th style="width: 60px">POS</th>
+                <th>NAMA TIM</th>
+                <th style="width: 100px">TOTAL SKOR</th>
+                <th style="width: 160px">STATUS KUALIFIKASI</th>
+                <th style="width: 160px">TIE-BREAK</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="t in qRanked"
+                :key="t.id"
+                :class="{
+                  selected: selectedFinalists.includes(t.id),
+                  qualified: t.pos <= 5,
+                  eliminated: t.pos > 5,
+                }"
+              >
+                <td class="text-center">
+                  <input
+                    type="checkbox"
+                    class="chk-box"
+                    :checked="selectedFinalists.includes(t.id)"
+                    @change="toggleFinalist(t.id)"
+                  />
+                </td>
+                <td class="text-center">
+                  <span class="tbl-pos" :class="{ top: t.pos <= 5 }">
+                    P{{ t.pos }}
+                  </span>
+                </td>
+                <td class="tbl-name">
+                  <span class="color-dot" :style="{ background: t.color }" />
+                  <b>{{ t.name }}</b>
+                </td>
+                <td class="tbl-score mono text-center">
+                  {{ t.score }}
+                </td>
+                <td>
+                  <span
+                    class="tbl-status-badge"
+                    :class="t.pos <= 5 ? 'status-q' : 'status-out'"
+                  >
+                    {{ t.pos <= 5 ? '5 BESAR (LOLOS)' : 'TERELIMINASI' }}
+                  </span>
+                </td>
+                <td>
+                  <div class="tie-controls">
+                    <button
+                      class="btn sm ghost"
+                      @click="resolveTiePriority(t.id, 1)"
+                      title="Prioritaskan jika skor sama"
+                    >
+                      +
+                    </button>
+                    <span class="mono prio-val">{{ t.tiePriority || 0 }}</span>
+                    <button
+                      class="btn sm ghost"
+                      @click="resolveTiePriority(t.id, -1)"
+                      title="Turunkan jika skor sama"
+                    >
+                      −
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Quarter Stage Scoring Grid -->
+      <AdminStage stage="quarter" />
+    </template>
+
+    <!-- TAB 2: GRAND FINAL & WINNER (Items 1, 3, 4) -->
     <template v-else-if="tab === 'final'">
       <div class="final-tools">
+        <!-- 1 · Balapan F1 -->
         <div class="card tool">
-          <h4>1 · Finalis</h4>
-          <p class="muted small">5 besar perempat final saat ini:</p>
-          <ol class="mini"><li v-for="t in qTop5" :key="t.id">{{ t.name }} <b>{{ t.score }}</b></li></ol>
-          <button class="btn red" @click="promote">
-            <F1Icon name="flag" :size="16" /> Loloskan 5 Besar ke Final
-          </button>
-        </div>
-        <div class="card tool">
-          <h4>2 · Balapan</h4>
-          <label class="small">Skor garis finish (panjang lintasan)
+          <h4>1 · Lintasan & Target Skor</h4>
+          <label class="small"
+            >Skor garis finish (panjang lintasan balapan):
             <div class="inline">
-              <input v-model.number="target" class="input" type="number" min="1" />
+              <input
+                v-model.number="target"
+                class="input"
+                type="number"
+                min="1"
+              />
               <button class="btn sm" @click="A.setTarget(target)">Simpan</button>
             </div>
           </label>
-          <button class="btn lg" @click="A.startRace()">
-            <F1Icon name="lights" :size="20" /> Nyalakan Lampu Start
+          <button class="btn lg primary" @click="A.startRace()">
+            <F1Icon name="lights" :size="20" /> Nyalakan Lampu Start F1
           </button>
-          <p class="muted small">Lampu start 5-merah F1 tampil di layar balapan.</p>
+          <p class="muted small">Lampu start 5-merah akan tampil di layar balapan.</p>
         </div>
-        <div class="card tool">
-          <h4>3 · Juara</h4>
-          <div v-for="(p, i) in 3" :key="i" class="inline">
-            <span class="pos-badge" :class="'p' + (i + 1)">P{{ i + 1 }}</span>
-            <select v-model="podiumPick[i]" class="input">
-              <option value="">—</option>
-              <option v-for="t in fRanked" :key="t.id" :value="t.id">{{ t.name }} ({{ t.score }})</option>
+
+        <!-- 2 · Penentuan Juara: Juara 1 Manual, 2 & 3 Otomatis by Point (Item 3) -->
+        <div class="card tool winner-card">
+          <h4>2 · Penentuan Juara Final</h4>
+          <p class="muted small">
+            <b>Juara 1 ditentukan secara manual</b> oleh admin/juri. Juara 2 dan
+            Juara 3 akan <b>dihitung secara otomatis</b> berdasarkan urutan skor
+            tertinggi dari tim yang tersisa.
+          </p>
+
+          <label class="small"
+            ><b>PILIH JUARA 1 (MANUAL):</b>
+            <select v-model="manualWinnerId" class="input" @change="applyManualWinner">
+              <option value="">— Pilih Tim Juara 1 —</option>
+              <option v-for="t in fRanked" :key="t.id" :value="t.id">
+                {{ t.name }} (Skor: {{ t.score }})
+              </option>
             </select>
+          </label>
+
+          <!-- Live Preview of Computed Podium -->
+          <div class="podium-preview">
+            <div class="preview-title">HASIL PODIUM OTOMATIS:</div>
+            <div
+              v-for="p in computedPodium"
+              :key="p.place"
+              class="podium-preview-row"
+              :class="'rank-' + p.place"
+            >
+              <span class="preview-badge">P{{ p.place }}</span>
+              <span class="preview-name">{{ p.name }}</span>
+              <span class="preview-score mono">{{ p.score }} poin</span>
+              <span class="preview-mode">
+                {{ p.isManual ? 'Manual (Juara 1)' : 'Otomatis by Poin' }}
+              </span>
+            </div>
           </div>
+
           <div class="inline wrap">
-            <button class="btn sm" @click="fillFromScore">Urut dari skor</button>
-            <button class="btn sm ghost" :disabled="!fin.podium" @click="A.setPodium(null)">Batalkan juara</button>
+            <button class="btn red" @click="publishPodium">
+              <F1Icon name="trophy" :size="16" /> Tampilkan Podium di Layar Live
+            </button>
+            <button class="btn ghost sm" @click="clearPodium">
+              Reset Juara
+            </button>
           </div>
-          <button class="btn red" @click="showPodium">
-            <F1Icon name="trophy" :size="16" /> Tampilkan Podium
-          </button>
-          <p v-if="fin.podium" class="small ok">Pemenang ditetapkan: <b>{{ teamName(fin.podium[0]) }}</b></p>
         </div>
       </div>
+
+      <!-- Final Stage Scoring & Direct "Juara 1" Action -->
       <AdminStage stage="final">
         <template #team-extra="{ team }">
-          <button class="btn sm crown" :class="{ active: fin.podium?.[0] === team.id }" @click="crown(team)">
-            <F1Icon name="trophy" :size="14" /> {{ fin.podium?.[0] === team.id ? 'Pemenang' : 'Menangkan' }}
+          <button
+            class="btn sm crown"
+            :class="{ active: manualWinnerId === team.id }"
+            @click="crownDirectly(team)"
+          >
+            <F1Icon name="trophy" :size="14" />
+            {{ manualWinnerId === team.id ? 'Juara 1 (Terpilih)' : 'Pilih Juara 1' }}
           </button>
         </template>
       </AdminStage>
     </template>
 
-    <!-- SETTINGS -->
+    <!-- TAB 3: SETTINGS & EXPORT -->
     <div v-else class="settings">
       <div class="card tool">
         <h4>Ekspor Skor (.CSV)</h4>
-        <p class="small muted">Unduh laporan skor siap buka di Microsoft Excel / Google Sheets:</p>
+        <p class="small muted">
+          Unduh laporan skor lengkap yang kompatibel dengan Microsoft Excel &
+          Google Sheets:
+        </p>
         <button class="btn green" @click="downloadQuarterCsv(state)">
           <F1Icon name="download" :size="16" /> Unduh CSV Perempat Final (20 Tim)
         </button>
@@ -217,12 +552,20 @@ async function logout() { await auth.logout(); router.push('/login') }
       <div class="card tool">
         <h4>Data Skor (.JSON)</h4>
         <p class="small muted">
-          Skor otomatis tersimpan dalam format JSON (<code>data/scores.json</code> saat dijalankan di server lokal & <code>localStorage</code>). Anda juga dapat mengunduh atau memuat file <code>.json</code>:
+          Skor otomatis disimpan dalam format JSON (<code>data/scores.json</code>
+          saat dijalankan di server lokal & <code>localStorage</code>). Anda juga
+          dapat mengunduh atau memuat backup file <code>.json</code>:
         </p>
         <button class="btn" @click="downloadScoresJson(state)">
           <F1Icon name="download" :size="16" /> Unduh / Backup Skor (.JSON)
         </button>
-        <input ref="jsonInput" type="file" accept=".json,application/json" style="display: none" @change="onImportJson" />
+        <input
+          ref="jsonInput"
+          type="file"
+          accept=".json,application/json"
+          style="display: none"
+          @change="onImportJson"
+        />
         <button class="btn ghost" @click="jsonInput?.click()">
           <F1Icon name="upload" :size="16" /> Muat / Impor Skor (.JSON)
         </button>
@@ -230,76 +573,541 @@ async function logout() { await auth.logout(); router.push('/login') }
       </div>
 
       <div class="card tool">
-        <h4>Info Acara</h4>
-        <label class="small">Judul<input v-model="meta.title" class="input" /></label>
-        <label class="small">Subjudul<input v-model="meta.subtitle" class="input" /></label>
-        <button class="btn red" @click="A.setMeta(meta)">Simpan</button>
+        <h4>Info Lomba (Ubah Nama Kompetisi)</h4>
+        <label class="small"
+          >Nama Lomba / Judul Acara:
+          <input v-model="meta.title" class="input" />
+        </label>
+        <label class="small"
+          >Subjudul / Penyelenggara:
+          <input v-model="meta.subtitle" class="input" />
+        </label>
+        <button class="btn primary" @click="A.setMeta(meta)">
+          Simpan Info Lomba
+        </button>
       </div>
+
       <div class="card tool">
         <h4>Ganti PIN Admin</h4>
-        <input v-model="newPin" class="input" type="password" inputmode="numeric" maxlength="8" placeholder="PIN baru" />
-        <input v-model="newPin2" class="input" type="password" inputmode="numeric" maxlength="8" placeholder="Ulangi PIN baru" />
+        <input
+          v-model="newPin"
+          class="input"
+          type="password"
+          inputmode="numeric"
+          maxlength="8"
+          placeholder="PIN baru"
+        />
+        <input
+          v-model="newPin2"
+          class="input"
+          type="password"
+          inputmode="numeric"
+          maxlength="8"
+          placeholder="Ulangi PIN baru"
+        />
         <button class="btn" @click="changePin">Simpan PIN</button>
-        <p v-if="pinMsg" class="small">{{ pinMsg }}</p>
+        <p v-if="pinMsg" class="small ok">{{ pinMsg }}</p>
       </div>
+
       <div class="card tool danger">
         <h4>Zona Bahaya</h4>
-        <button class="btn" @click="confirmDo('Reset semua skor PEREMPAT FINAL ke 0?', () => A.resetScores(state, 'quarter'))">Reset skor perempat final</button>
-        <button class="btn" @click="confirmDo('Reset semua skor GRAND FINAL ke 0?', () => A.resetScores(state, 'final'))">Reset skor final</button>
-        <button class="btn minus" @click="confirmDo('RESET SEMUA DATA (nama tim, babak, skor)? Tidak bisa dibatalkan!', A.resetAll)">Reset Semua Data</button>
+        <button
+          class="btn"
+          @click="
+            confirmDo('Reset semua skor PEREMPAT FINAL ke 0?', () =>
+              A.resetScores(state, 'quarter'),
+            )
+          "
+        >
+          Reset Skor Perempat Final
+        </button>
+        <button
+          class="btn"
+          @click="
+            confirmDo('Reset semua skor GRAND FINAL ke 0?', () =>
+              A.resetScores(state, 'final'),
+            )
+          "
+        >
+          Reset Skor Final
+        </button>
+        <button
+          class="btn minus"
+          @click="
+            confirmDo(
+              'RESET SEMUA DATA (nama tim, babak, skor)? Tindakan ini tidak bisa dibatalkan!',
+              A.resetAll,
+            )
+          "
+        >
+          Reset Seluruh Data Kompetisi
+        </button>
       </div>
+
       <div class="card tool">
-        <h4>Tautan Layar</h4>
-        <p class="small muted">Buka di laptop/proyektor lain:</p>
-        <code>/live</code><span class="small muted">mengikuti pilihan "Layar Live"</span>
-        <code>/perempat</code><span class="small muted">papan skor / klasemen</span>
-        <code>/final</code><span class="small muted">balapan / podium</span>
+        <h4>Tautan Layar Publik</h4>
+        <p class="small muted">Buka tautan ini di laptop atau proyektor panggung:</p>
+        <code>/live</code
+        ><span class="small muted">mengikuti pilihan Layar Live di atas</span>
+        <code>/perempat</code
+        ><span class="small muted">papan skor / klasemen perempat final</span>
+        <code>/final</code
+        ><span class="small muted">balapan lintasan / podium grand final</span>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.admin { min-height: 100vh; padding: 16px clamp(12px, 2vw, 28px) 40px; display: flex; flex-direction: column; gap: 14px; background: var(--bg); }
-.ah { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.ah .brand { font-size: 24px; }
-.grow { flex: 1; }
-.badge { font-size: 12px; font-weight: 900; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.08em; }
-.badge.firebase { background: #0b7f45; }
-.badge.local { background: var(--yellow); color: #222; }
-.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); }
-.dot.off { background: var(--red); }
-.email { font-size: 14px; }
+.admin {
+  min-height: 100vh;
+  padding: 16px clamp(12px, 2vw, 28px) 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--bg);
+}
+.ah {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ah .brand {
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.comp-title {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+.panel-tag {
+  background: rgba(4, 105, 239, 0.2);
+  color: var(--cyan);
+  border: 1px solid rgba(2, 201, 251, 0.4);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.1em;
+}
+.grow {
+  flex: 1;
+}
+.badge {
+  font-size: 12px;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 4px;
+  letter-spacing: 0.08em;
+}
+.badge.firebase {
+  background: #0b8045;
+  color: #fff;
+}
+.badge.local {
+  background: var(--cyan);
+  color: #061426;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+.dot.off {
+  background: var(--coral);
+}
+.email {
+  font-size: 14px;
+}
 
-.control { display: flex; align-items: center; gap: 10px; padding: 10px 14px; flex-wrap: wrap; border-left: 5px solid var(--red); }
-.lbl { font-weight: 900; font-style: italic; letter-spacing: 0.1em; }
-.screens { display: flex; gap: 6px; flex-wrap: wrap; }
+.control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+  border-left: 5px solid var(--blue);
+  background: var(--panel);
+}
+.lbl {
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.1em;
+  color: var(--cyan);
+}
+.screens {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 
-.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--line); }
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--line);
+}
 .tabs button {
-  background: none; border: 0; color: var(--muted); padding: 10px 18px; font-weight: 900; font-style: italic;
-  text-transform: uppercase; font-size: 16px; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 10px 20px;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 16px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
 }
-.tabs button.on { color: #fff; border-color: var(--red); }
+.tabs button:hover {
+  color: #fff;
+}
+.tabs button.on {
+  color: #fff;
+  border-color: var(--cyan);
+}
 
-.final-tools, .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.tool { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.tool h4 { margin: 0; font-style: italic; text-transform: uppercase; }
-.tool label { display: flex; flex-direction: column; gap: 4px; }
-.small { font-size: 13px; margin: 0; }
-.mini { margin: 0; padding-left: 20px; font-size: 14px; }
-.mini b { color: var(--green); }
-.inline { display: flex; gap: 6px; align-items: center; }
-.inline.wrap { flex-wrap: wrap; }
-.pos-badge {
-  min-width: 34px; height: 32px; border-radius: 4px; display: grid; place-items: center;
-  font-weight: 900; font-style: italic; font-size: 14px; color: #111;
+/* Tie alert banner */
+.tie-alert {
+  padding: 16px 20px;
+  background: rgba(251, 67, 37, 0.12);
+  border: 2px solid var(--coral);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.pos-badge.p1 { background: var(--gold); }
-.pos-badge.p2 { background: var(--silver); }
-.pos-badge.p3 { background: var(--bronze); }
-.ok { color: var(--gold); }
-.crown.active { background: #6b5200; border-color: var(--gold); }
-.danger { border-color: #5a1414; }
-code { background: #12121a; padding: 2px 8px; border-radius: 4px; color: var(--gold); width: fit-content; }
+.tie-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.warn-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--coral);
+  box-shadow: 0 0 10px var(--coral);
+}
+.tie-title {
+  margin: 0;
+  color: var(--coral);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.05em;
+}
+.tie-desc {
+  margin: 0;
+  font-size: 14px;
+  color: #fff;
+}
+.tie-team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tie-team-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #0f1526;
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  border-radius: 6px;
+}
+.badge-pos {
+  font-weight: 900;
+  font-style: italic;
+  background: var(--panel-2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.t-name {
+  font-weight: 700;
+  font-size: 16px;
+  flex: 1;
+}
+.t-score {
+  font-weight: 900;
+  color: var(--cyan);
+}
+.tie-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+/* Finalist Manager */
+.finalist-manager {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.fm-header h4 {
+  margin: 0 0 4px;
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.fm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.counter {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  background: #090e1a;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.counter.ok {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.teams-table-scroll {
+  max-height: 380px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.teams-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.teams-table th {
+  background: #11182c;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--cyan);
+  border-bottom: 2px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.teams-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.teams-table tr.selected {
+  background: rgba(4, 105, 239, 0.12);
+}
+.teams-table tr.eliminated {
+  opacity: 0.82;
+}
+.chk-box {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+.text-center {
+  text-align: center;
+}
+.tbl-pos {
+  display: inline-block;
+  padding: 2px 6px;
+  font-weight: 900;
+  font-style: italic;
+  border-radius: 4px;
+  background: #1c2742;
+  color: var(--muted);
+}
+.tbl-pos.top {
+  background: var(--blue);
+  color: #fff;
+}
+.tbl-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.tbl-score {
+  font-weight: 900;
+  font-size: 16px;
+  color: #fff;
+}
+.tbl-status-badge {
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+.status-q {
+  background: rgba(0, 210, 106, 0.2);
+  color: var(--green);
+  border: 1px solid rgba(0, 210, 106, 0.4);
+}
+.status-out {
+  background: #1c2338;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.tie-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.prio-val {
+  min-width: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--cyan);
+}
+
+/* Winner Card (Item 3) */
+.winner-card {
+  border-color: rgba(255, 207, 63, 0.4);
+  background: linear-gradient(180deg, #18223d, #11182c);
+}
+.podium-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #090e1a;
+  border: 1px solid var(--line);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 6px 0;
+}
+.preview-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+}
+.podium-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #131c33;
+}
+.preview-badge {
+  font-weight: 900;
+  font-style: italic;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.rank-1 .preview-badge {
+  background: var(--gold);
+  color: #111;
+}
+.rank-2 .preview-badge {
+  background: var(--silver);
+  color: #111;
+}
+.rank-3 .preview-badge {
+  background: var(--bronze);
+  color: #fff;
+}
+.preview-name {
+  font-weight: 900;
+  font-style: italic;
+  flex: 1;
+}
+.preview-score {
+  font-weight: 900;
+  color: var(--cyan);
+}
+.preview-mode {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: #070a12;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.final-tools,
+.settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 14px;
+}
+.tool {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tool h4 {
+  margin: 0;
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.tool label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.small {
+  font-size: 13px;
+  margin: 0;
+}
+.inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.inline.wrap {
+  flex-wrap: wrap;
+}
+.ok {
+  color: var(--green);
+  font-weight: 700;
+}
+.crown {
+  margin-top: 4px;
+}
+.crown.active {
+  background: #735100;
+  border-color: var(--gold);
+  color: #fff;
+}
+.danger {
+  border-color: #631922;
+}
+code {
+  background: #090e1a;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: var(--cyan);
+  width: fit-content;
+  font-family: monospace;
+}
 </style>

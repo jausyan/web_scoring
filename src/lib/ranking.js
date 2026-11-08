@@ -1,6 +1,10 @@
 /**
- * Rank teams: highest score first. Tie-break: whoever reached that score
- * earlier (lower lastAt), then original team order.
+ * Rank teams: highest score first.
+ * Tie-break priority:
+ * 1. Score (descending)
+ * 2. tiePriority (descending, manual admin resolution when scores tie)
+ * 3. lastAt (who reached score earlier)
+ * 4. original team order
  */
 export function rankTeams(teams = {}) {
   return Object.entries(teams)
@@ -8,6 +12,7 @@ export function rankTeams(teams = {}) {
     .sort(
       (a, b) =>
         b.score - a.score ||
+        (Number(b.tiePriority) || 0) - (Number(a.tiePriority) || 0) ||
         (a.lastAt || 0) - (b.lastAt || 0) ||
         (a.order || 0) - (b.order || 0),
     )
@@ -33,3 +38,44 @@ export function activeRoundOf(stageData) {
 }
 
 export const fmtDelta = (n) => (n > 0 ? `+${n}` : `${n}`)
+
+/**
+ * Detect teams with identical scores.
+ * Returns array of tie groups: [{ score: 80, count: 2, teams: [...] }]
+ */
+export function findTiedGroups(teams = {}) {
+  const ranked = rankTeams(teams)
+  const map = {}
+  for (const t of ranked) {
+    if (!map[t.score]) map[t.score] = []
+    map[t.score].push(t)
+  }
+  return Object.entries(map)
+    .filter(([, list]) => list.length > 1)
+    .map(([score, list]) => ({
+      score: Number(score),
+      count: list.length,
+      teams: list,
+      // Check if this tie spans across the cutoff (pos <= 5 and pos > 5)
+      spansCutoff: list.some((t) => t.pos <= 5) && list.some((t) => t.pos > 5),
+    }))
+    .sort((a, b) => b.score - a.score)
+}
+
+/**
+ * Compute podium order:
+ * Winner (Juara 1) is chosen manually by admin.
+ * Juara 2 & Juara 3 are automatically sorted by score from the remaining final teams.
+ */
+export function computeFinalPodium(teams = {}, manualWinnerId = null) {
+  const ranked = rankTeams(teams)
+  if (!manualWinnerId || !teams[manualWinnerId]) {
+    // If no manual winner, default to top 3 by score
+    return ranked.slice(0, 3).map((t) => t.id)
+  }
+  const remaining = ranked.filter((t) => t.id !== manualWinnerId)
+  const p1 = manualWinnerId
+  const p2 = remaining[0]?.id || null
+  const p3 = remaining[1]?.id || null
+  return [p1, p2, p3].filter(Boolean)
+}

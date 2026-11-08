@@ -14,7 +14,7 @@ const lanes = computed(() => sortedByOrder(fin.value.teams))
 const ranked = computed(() => rankTeams(fin.value.teams))
 const posMap = computed(() => Object.fromEntries(ranked.value.map((t) => [t.id, t.pos])))
 const leaderScore = computed(() => ranked.value[0]?.score ?? 0)
-const winnerId = computed(() => fin.value.podium?.[0] || null)
+const winnerId = computed(() => fin.value.podium?.[0] || fin.value.winnerManualId || null)
 const winner = computed(() => (winnerId.value ? lanes.value.find((t) => t.id === winnerId.value) : null))
 const scale = computed(() => Math.max(Number(fin.value.target) || 100, ...lanes.value.map((t) => t.score), 1))
 const marks = computed(() => [0.25, 0.5, 0.75].map((f) => ({ f, v: Math.round(scale.value * f) })))
@@ -81,7 +81,7 @@ function progress(t) {
       </section>
 
       <aside class="tower">
-        <div class="th"><span class="brand"><span class="logo">LIVE</span></span> TIMING</div>
+        <div class="th"><span class="brand"><span class="logo">EPW</span></span> LIVE TIMING</div>
         <TransitionGroup name="tw" tag="div" class="trows">
           <div v-for="t in ranked" :key="t.id" class="trow" :class="{ p1: t.pos === 1 }">
             <span class="p">{{ t.pos }}</span>
@@ -105,7 +105,7 @@ function progress(t) {
   position: relative; display: flex; flex-direction: column; min-width: 0;
   background:
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 6px),
-    linear-gradient(180deg, #2e2e36, #26262d);
+    linear-gradient(180deg, #161d2d, #101624);
   --carw: clamp(110px, 11vw, 210px);
 }
 .edge { height: clamp(10px, 1.6vh, 18px); flex: none; }
@@ -113,25 +113,26 @@ function progress(t) {
 .startline { position: absolute; left: 3%; top: 0; bottom: 0; width: 6px; background: #fff; opacity: 0.85; }
 .mark {
   position: absolute; top: 0; bottom: 0; left: calc(3% + var(--f) * 91%); width: 0;
-  border-left: 2px dashed rgba(255, 255, 255, 0.12);
+  border-left: 2px dashed rgba(255, 255, 255, 0.15);
 }
 .mark span {
-  position: absolute; top: 6px; left: 6px; font-weight: 700; color: rgba(255, 255, 255, 0.3);
+  position: absolute; top: 6px; left: 6px; font-weight: 700; color: rgba(255, 255, 255, 0.35);
   font-size: clamp(11px, 0.9vw, 15px);
 }
-.finish { position: absolute; right: 6%; top: 0; bottom: 0; width: clamp(18px, 1.8vw, 32px); background-size: 16px 16px; }
+.finish { position: absolute; right: 6%; top: 0; bottom: 0; width: clamp(18px, 1.8vw, 32px); background-size: 16px 16px; border: 1px solid rgba(255, 255, 255, 0.3); }
 .flabel {
   position: absolute; top: 6px; right: calc(100% + 8px); white-space: nowrap; font-weight: 900; font-style: italic;
-  background: #111; padding: 0 8px; font-size: clamp(11px, 0.9vw, 15px);
+  background: #080c18; border: 1px solid var(--line); padding: 2px 8px; font-size: clamp(11px, 0.9vw, 15px);
+  color: var(--cyan);
 }
 
-.lane { position: relative; flex: 1; border-bottom: 3px dashed rgba(255, 255, 255, 0.25); min-height: 0; }
+.lane { position: relative; flex: 1; border-bottom: 3px dashed rgba(255, 255, 255, 0.2); min-height: 0; }
 .lane:last-child { border-bottom: 0; }
-.lane.lead { background: linear-gradient(90deg, rgba(255, 207, 63, 0.08), transparent 70%); }
-.lane.won { background: linear-gradient(90deg, rgba(255, 207, 63, 0.18), rgba(255, 207, 63, 0.05)); }
+.lane.lead { background: linear-gradient(90deg, rgba(4, 105, 239, 0.14), transparent 70%); }
+.lane.won { background: linear-gradient(90deg, rgba(255, 207, 63, 0.2), rgba(4, 105, 239, 0.1)); }
 .lane-no {
   position: absolute; left: 0.4%; top: 50%; transform: translateY(-50%); font-weight: 900; font-style: italic;
-  font-size: clamp(18px, 2vw, 34px); color: rgba(255, 255, 255, 0.55);
+  font-size: clamp(18px, 2vw, 34px); color: rgba(255, 255, 255, 0.45);
 }
 .lane-name {
   position: absolute; left: 18%; right: 12%; top: 50%; transform: translateY(-50%); text-align: center;
@@ -147,12 +148,12 @@ function progress(t) {
   z-index: 2;
 }
 .car-wrap.moving :deep(.car) { animation: rumble 0.12s linear 10; }
-.car-wrap.back :deep(.car) { filter: drop-shadow(0 0 14px rgba(225, 6, 0, 0.9)); }
+.car-wrap.back :deep(.car) { filter: drop-shadow(0 0 14px rgba(251, 67, 37, 0.9)); }
 @keyframes rumble { 50% { transform: translateY(1.5px); } }
 
 .speed {
   position: absolute; right: 92%; top: 25%; height: 50%; width: 0; opacity: 0;
-  background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0 2px, transparent 2px 8px);
+  background: repeating-linear-gradient(180deg, rgba(2, 201, 251, 0.8) 0 2px, transparent 2px 8px);
   mask: linear-gradient(90deg, transparent, #000);
   transition: width 0.3s, opacity 0.3s;
 }
@@ -161,31 +162,33 @@ function progress(t) {
 .tag {
   position: absolute; bottom: 92%; left: 4%; display: flex; align-items: center; white-space: nowrap;
   font-size: clamp(11px, 1.05vw, 18px); font-weight: 700; border-radius: 4px; overflow: visible;
-  background: #0e0e14; border-left: 5px solid var(--c); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  background: #090e1a; border-left: 5px solid var(--c); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
 }
-.tpos { background: #fff; color: #111; font-weight: 900; font-style: italic; padding: 0 6px; }
-.lane.lead .tpos { background: var(--gold); }
+.tpos { background: #fff; color: #070a12; font-weight: 900; font-style: italic; padding: 0 6px; }
+.lane.lead .tpos { background: linear-gradient(135deg, var(--blue), var(--cyan)); color: #fff; }
 .tname { padding: 0 8px; text-transform: uppercase; max-width: 14vw; overflow: hidden; text-overflow: ellipsis; }
-.tscore { background: var(--red); padding: 0 8px; font-weight: 900; }
+.tscore { background: var(--blue); padding: 0 8px; font-weight: 900; color: #fff; }
 .chip {
   position: absolute; left: 100%; margin-left: 6px; padding: 0 8px; border-radius: 4px; font-weight: 900;
   animation: floatUp 1.5s ease-out forwards;
 }
 .chip.pos { background: var(--green); color: #00250f; }
-.chip.neg { background: var(--red); }
+.chip.neg { background: var(--coral); color: #fff; }
 @keyframes floatUp { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-120%); opacity: 0; } }
 .crown {
   position: absolute; right: -8%; top: -40%; color: var(--gold);
-  background: rgba(15, 15, 23, 0.9); border: 2px solid var(--gold); border-radius: 6px; padding: 4px 6px;
+  background: rgba(15, 23, 42, 0.9); border: 2px solid var(--gold); border-radius: 6px; padding: 4px 6px;
   display: grid; place-items: center; animation: bob 1s ease-in-out infinite;
+  box-shadow: 0 0 16px rgba(255, 207, 63, 0.5);
 }
 @keyframes bob { 50% { transform: translateY(-6px) rotate(8deg); } }
 
 .winner-banner {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 20;
   display: flex; align-items: center; gap: 24px; padding: 18px 40px; text-align: center;
-  background: rgba(10, 10, 16, 0.9); border: 3px solid var(--gold); border-radius: 12px;
-  box-shadow: 0 0 60px rgba(255, 207, 63, 0.35);
+  background: rgba(8, 12, 22, 0.95); border: 3px solid var(--gold); border-radius: 12px;
+  box-shadow: 0 0 60px rgba(255, 207, 63, 0.4);
 }
 .wk { font-weight: 900; letter-spacing: 0.2em; color: var(--gold); font-size: clamp(12px, 1.2vw, 20px); }
 .wn { font-weight: 900; font-style: italic; text-transform: uppercase; font-size: clamp(30px, 4.5vw, 80px); line-height: 1.05; }
@@ -198,19 +201,19 @@ function progress(t) {
 @keyframes winIn { from { transform: translate(-50%, -50%) scale(0.3); opacity: 0; } }
 
 /* ---------- timing tower ---------- */
-.tower { background: #0c0c12; border-left: 3px solid var(--red); display: flex; flex-direction: column; padding: 14px; gap: 10px; }
-.th { font-weight: 900; font-style: italic; font-size: clamp(16px, 1.6vw, 26px); display: flex; gap: 8px; align-items: center; }
+.tower { background: #0b0f1a; border-left: 3px solid var(--blue); display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+.th { font-weight: 900; font-style: italic; font-size: clamp(16px, 1.6vw, 26px); display: flex; gap: 8px; align-items: center; color: var(--cyan); }
 .trows { display: flex; flex-direction: column; gap: 6px; position: relative; }
 .trow {
-  display: flex; align-items: center; background: #1b1b26; border-radius: 4px; overflow: hidden;
+  display: flex; align-items: center; background: #131b2e; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
   font-size: clamp(14px, 1.4vw, 24px); height: clamp(40px, 6.5vh, 70px);
 }
-.trow.p1 { background: linear-gradient(90deg, #5a4500, #1b1b26); }
-.trow .p { width: 2em; align-self: stretch; display: grid; place-items: center; background: #fff; color: #111; font-weight: 900; font-style: italic; }
-.trow.p1 .p { background: var(--gold); }
+.trow.p1 { background: linear-gradient(90deg, #2b220a, #131b2e); border-color: var(--gold); }
+.trow .p { width: 2em; align-self: stretch; display: grid; place-items: center; background: #fff; color: #070a12; font-weight: 900; font-style: italic; }
+.trow.p1 .p { background: var(--gold); color: #1f1400; }
 .trow .s { width: 5px; align-self: stretch; margin: 0 8px 0 4px; }
 .trow .n { flex: 1; font-weight: 700; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow .g { font-size: 0.6em; color: var(--muted); margin-right: 8px; font-weight: 700; }
-.trow .v { font-weight: 900; padding-right: 10px; min-width: 2.4em; text-align: right; }
+.trow .v { font-weight: 900; padding-right: 10px; min-width: 2.4em; text-align: right; color: var(--cyan); }
 .tw-move { transition: transform 0.7s cubic-bezier(0.45, 0.05, 0.25, 1); }
 </style>

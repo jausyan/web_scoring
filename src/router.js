@@ -8,12 +8,12 @@ import Login from './views/Login.vue'
 import Admin from './views/Admin.vue'
 
 const routes = [
-  { path: '/', component: Home, meta: { label: 'LCC GRAND PRIX' } },
-  { path: '/live', component: Display, props: { filter: 'all' }, meta: { label: 'LIVE' } },
+  { path: '/', component: Home, meta: { label: 'LCC EPW 2026' } },
+  { path: '/live', component: Display, props: { filter: 'all' }, meta: { label: 'LIVE PROYEKTOR' } },
   { path: '/perempat', component: Display, props: { filter: 'quarter' }, meta: { label: 'PEREMPAT FINAL' } },
   { path: '/final', component: Display, props: { filter: 'final' }, meta: { label: 'GRAND FINAL' } },
-  { path: '/login', component: Login, meta: { label: 'PIT LANE' } },
-  { path: '/admin', component: Admin, meta: { label: 'RACE CONTROL', requiresAdmin: true } },
+  { path: '/login', component: Login, meta: { label: 'LOGIN JURI' } },
+  { path: '/admin', component: Admin, meta: { label: 'PANEL JURI LCC EPW', requiresAdmin: true } },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

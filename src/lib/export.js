@@ -1,4 +1,4 @@
-import { rankTeams, sortedRounds } from './ranking'
+import { rankTeams, sortedRounds, computeFinalPodium } from './ranking'
 import { withDefaults } from './defaultState'
 import { backend } from './backend'
 
@@ -57,7 +57,7 @@ function buildStageRows(state, stage) {
   const rounds = sortedRounds(stageData.rounds)
   const ranked = rankTeams(stageData.teams)
   const byRound = roundBreakdown(state, stage)
-  const podium = state.final?.podium || []
+  const podium = state.final?.podium || computeFinalPodium(state.final?.teams || {}, state.final?.winnerManualId)
 
   const header = [
     'Peringkat',

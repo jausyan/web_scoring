@@ -1,5 +1,5 @@
 import { backend } from './backend'
-import { rankTeams, sortedRounds } from './ranking'
+import { rankTeams, sortedRounds, computeFinalPodium } from './ranking'
 import { defaultState, FINAL_COLORS } from './defaultState'
 
 const INC = (n) => ({ __inc: n })
@@ -58,32 +58,53 @@ export const deleteRound = (stage, id) => backend.update({ [`${stage}/rounds/${i
 export const setTeamField = (stage, id, field, value) =>
   backend.update({ [`${stage}/teams/${id}/${field}`]: value })
 
+export const setTiePriority = (stage, teamId, priority) =>
+  backend.update({ [`${stage}/teams/${teamId}/tiePriority`]: Number(priority) || 0 })
+
 export function resetScores(state, stage) {
   const u = {}
   for (const id of Object.keys(state[stage].teams || {})) {
     u[`${stage}/teams/${id}/score`] = 0
     u[`${stage}/teams/${id}/lastAt`] = 0
+    u[`${stage}/teams/${id}/tiePriority`] = 0
   }
   for (const [k, e] of Object.entries(state.log || {})) if (e.stage === stage) u[`log/${k}`] = null
-  if (stage === 'final') u['final/podium'] = null
+  if (stage === 'final') {
+    u['final/podium'] = null
+    u['final/winnerManualId'] = null
+  }
   return backend.update(u)
 }
 
+/** Automatically promote top 5 from quarterfinal */
 export function promoteTop5(state) {
   const top = rankTeams(state.quarter.teams).slice(0, 5)
+  return promoteSelectedTeams(
+    state,
+    top.map((t) => t.id),
+  )
+}
+
+/** Promote manually specified team IDs (up to 5) from quarterfinal into final */
+export function promoteSelectedTeams(state, teamIds = []) {
   const teams = {}
-  top.forEach((t, i) => {
+  teamIds.slice(0, 5).forEach((id, i) => {
+    const qt = state.quarter.teams[id] || {}
     teams[`f${i + 1}`] = {
-      name: t.name,
-      number: t.order,
+      name: qt.name || `Finalis ${i + 1}`,
+      number: qt.order || i + 1,
       order: i + 1,
-      sourceId: t.id,
-      color: FINAL_COLORS[i],
+      sourceId: id,
+      color: FINAL_COLORS[i % FINAL_COLORS.length],
       score: 0,
       lastAt: 0,
     }
   })
-  const u = { 'final/teams': teams, 'final/podium': null }
+  const u = {
+    'final/teams': teams,
+    'final/podium': null,
+    'final/winnerManualId': null,
+  }
   for (const [k, e] of Object.entries(state.log || {})) if (e.stage === 'final') u[`log/${k}`] = null
   return backend.update(u)
 }
@@ -95,13 +116,32 @@ export const startRace = () => backend.update({ 'final/startSeq': INC(1) })
 
 export const setTarget = (n) => backend.update({ 'final/target': Math.max(1, Number(n) || 100) })
 
-/** Lock in podium order (array of up to 3 team ids). */
-export const setPodium = (ids) => backend.update({ 'final/podium': ids?.length ? ids : null })
+/** Lock in podium order directly */
+export const setPodium = (ids, manualWinnerId = null) => {
+  return backend.update({
+    'final/podium': ids?.length ? ids : null,
+    'final/winnerManualId': manualWinnerId || (ids?.[0] ?? null),
+  })
+}
 
-/** Admin crowns a team: it becomes P1, the rest follow by score. */
+/**
+ * Winner (Juara 1) is chosen manually by admin.
+ * Juara 2 & 3 are computed automatically from remaining teams by score.
+ */
+export function setManualWinner(state, winnerId) {
+  if (!winnerId) {
+    return backend.update({
+      'final/podium': null,
+      'final/winnerManualId': null,
+    })
+  }
+  const podium = computeFinalPodium(state.final.teams, winnerId)
+  return setPodium(podium, winnerId)
+}
+
+/** Admin crowns a team: sets that team as Juara 1, 2 & 3 auto by score */
 export function crownTeam(state, id) {
-  const rest = rankTeams(state.final.teams).map((t) => t.id).filter((x) => x !== id)
-  return setPodium([id, ...rest].slice(0, 3))
+  return setManualWinner(state, id)
 }
 
 export const setMeta = (meta) =>
