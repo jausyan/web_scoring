@@ -1,5 +1,5 @@
 import { createFirebaseBackend } from './firebase'
-import { createLocalBackend } from './local'
+import { createCloudBackend } from './cloud'
 import { defaultState } from '../defaultState'
 
 const env = import.meta.env
@@ -15,11 +15,11 @@ const firebaseConfig = {
 
 /**
  * Backend interface:
- *  subscribe(cb) · onConnection(cb) · update({path: value}) · newKey(path)
- *  initIfEmpty() · replaceAll(state) · login/logout/onAuth · getPinHash/setPinHash
- * Values may be {__inc: n} (atomic increment) or {__now: true} (timestamp).
+ * Automatically uses Cloud Realtime Sync (MQTT WebSockets) by default.
+ * Works seamlessly across separate laptops/phones without any setup or API keys.
+ * If Firebase credentials are provided in env, switches to Firebase.
  */
 export const backend =
   firebaseConfig.apiKey && firebaseConfig.databaseURL
     ? createFirebaseBackend(firebaseConfig, defaultState)
-    : createLocalBackend(defaultState)
+    : createCloudBackend(defaultState)

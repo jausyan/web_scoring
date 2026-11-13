@@ -20,6 +20,8 @@ import {
 } from '../lib/export'
 import AdminStage from '../components/AdminStage.vue'
 import F1Icon from '../components/F1Icon.vue'
+import { getActiveRoomId, setActiveRoomId } from '../lib/backend/cloud'
+import { backend } from '../lib/backend'
 
 const router = useRouter()
 const { state, connected, mode } = useLive()
@@ -34,6 +36,47 @@ const lastText = computed(() => {
   const t = state.value[e.stage]?.teams?.[e.teamId]
   return `${t?.name ?? e.teamId} ${fmtDelta(e.delta)}`
 })
+
+/* ---- Multi-Device Realtime Connection ---- */
+const roomId = ref(getActiveRoomId())
+const newRoomInput = ref('')
+const copyMsg = ref('')
+const syncNotice = ref('')
+const lanIps = ref([])
+
+function getSecondDeviceUrl(path = '/live') {
+  if (typeof window === 'undefined') return ''
+  const origin = window.location.origin
+  const room = roomId.value || 'lcc_epw_2026'
+  return `${origin}${path}?room=${room}`
+}
+
+async function copyLink(url) {
+  try {
+    await navigator.clipboard.writeText(url)
+    copyMsg.value = '✓ Tautan berhasil disalin!'
+    setTimeout(() => {
+      copyMsg.value = ''
+    }, 3000)
+  } catch {
+    prompt('Salin tautan ini:', url)
+  }
+}
+
+function doForceSync() {
+  backend.forceSync?.()
+  syncNotice.value = '✓ Seluruh data skor berhasil dipancarkan ke semua laptop!'
+  setTimeout(() => {
+    syncNotice.value = ''
+  }, 3000)
+}
+
+function changeRoom() {
+  if (!newRoomInput.value.trim()) return
+  if (confirm(`Ganti saluran ke "${newRoomInput.value.trim()}"? Halaman akan dimuat ulang.`)) {
+    setActiveRoomId(newRoomInput.value.trim())
+  }
+}
 
 /* ---- Perempat Final / Finalis Selection (Items 1, 2, 4) ---- */
 const qRanked = computed(() => rankTeams(state.value.quarter.teams))
@@ -55,6 +98,17 @@ watch(
   },
   { immediate: true },
 )
+
+onMounted(() => {
+  if (typeof fetch !== 'undefined') {
+    fetch('/api/info')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.ips?.length) lanIps.value = d.ips
+      })
+      .catch(() => {})
+  }
+})
 
 function toggleFinalist(id) {
   const idx = selectedFinalists.value.indexOf(id)
@@ -209,12 +263,23 @@ async function logout() {
         <span class="comp-title">{{ state.meta.title || 'LCC EPW 2026' }}</span>
         <span class="panel-tag">PANEL JURI</span>
       </div>
-      <span class="badge" :class="mode">{{
-        mode === 'firebase' ? 'ONLINE' : 'JSON LOKAL'
-      }}</span>
-      <span class="dot" :class="{ off: !connected }" />
+      <span class="badge" :class="connected ? 'online' : 'offline'">
+        {{ connected ? 'REALTIME ONLINE' : 'MENGHUBUNGKAN...' }}
+      </span>
+      <span
+        class="dot"
+        :class="{ off: !connected }"
+        :title="connected ? 'Terhubung Multi-Perangkat (Siap Real-Time)' : 'Mencoba Terhubung...'"
+      />
       <span class="grow" />
       <span class="muted email">{{ auth.user.value?.email }}</span>
+      <button
+        class="btn sm blue"
+        @click="doForceSync"
+        title="Pancarkan ulang data skor ke semua laptop yang terhubung"
+      >
+        ⚡ Sinkronkan Semua
+      </button>
       <button
         class="btn sm green"
         @click="downloadAllScoresCsv(state)"
@@ -532,6 +597,68 @@ async function logout() {
 
     <!-- TAB 3: SETTINGS & EXPORT -->
     <div v-else class="settings">
+      <!-- Multi-Device Connection Card -->
+      <div class="card tool sync-tool">
+        <h4>Koneksi Multi-Laptop & Real-Time Sync</h4>
+        <p class="small muted">
+          Skor otomatis tersinkronisasi antar-laptop melalui Cloud Realtime Relay.
+          Buka tautan di bawah ini pada laptop kedua (layar proyektor atau juri tambahan).
+        </p>
+
+        <div class="sync-status-box">
+          <div class="sync-row">
+            <span class="sync-label">Status Koneksi:</span>
+            <span class="sync-val" :class="{ ok: connected }">
+              {{ connected ? '● Terhubung Realtime' : '○ Menghubungkan ke Broker...' }}
+            </span>
+          </div>
+          <div class="sync-row">
+            <span class="sync-label">Room / Saluran:</span>
+            <span class="sync-val code-val">#{{ roomId }}</span>
+          </div>
+        </div>
+
+        <div class="link-box">
+          <label class="small"><b>Tautan Layar Proyektor untuk Laptop Kedua:</b></label>
+          <div class="inline">
+            <input readonly class="input code-input" :value="getSecondDeviceUrl('/live')" />
+            <button class="btn sm primary" @click="copyLink(getSecondDeviceUrl('/live'))">Salin</button>
+          </div>
+        </div>
+
+        <div class="link-box">
+          <label class="small"><b>Tautan Panel Juri untuk Laptop Kedua:</b></label>
+          <div class="inline">
+            <input readonly class="input code-input" :value="getSecondDeviceUrl('/admin')" />
+            <button class="btn sm" @click="copyLink(getSecondDeviceUrl('/admin'))">Salin</button>
+          </div>
+        </div>
+
+        <div v-if="lanIps.length" class="link-box">
+          <label class="small"><b>IP Jaringan Lokal (WiFi yang sama):</b></label>
+          <div class="inline">
+            <input readonly class="input code-input" :value="`http://${lanIps[0]}:5173/live?room=${roomId}`" />
+            <button class="btn sm ghost" @click="copyLink(`http://${lanIps[0]}:5173/live?room=${roomId}`)">Salin</button>
+          </div>
+        </div>
+
+        <div class="inline wrap">
+          <button class="btn blue" @click="doForceSync">
+            ⚡ Sinkronkan Paksa ke Semua Laptop
+          </button>
+        </div>
+        <p v-if="syncNotice" class="small ok">{{ syncNotice }}</p>
+        <p v-if="copyMsg" class="small ok">{{ copyMsg }}</p>
+
+        <div class="change-room-box">
+          <label class="small">Ganti Room / Saluran Baru:</label>
+          <div class="inline">
+            <input v-model="newRoomInput" class="input" placeholder="misal: lcc-epw-sesi2" />
+            <button class="btn sm ghost" @click="changeRoom">Ganti Room</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card tool">
         <h4>Ekspor Skor (.CSV)</h4>
         <p class="small muted">
@@ -706,6 +833,14 @@ async function logout() {
   border-radius: 4px;
   letter-spacing: 0.08em;
 }
+.badge.online {
+  background: #0b8045;
+  color: #fff;
+}
+.badge.offline {
+  background: var(--coral);
+  color: #fff;
+}
 .badge.firebase {
   background: #0b8045;
   color: #fff;
@@ -713,6 +848,61 @@ async function logout() {
 .badge.local {
   background: var(--cyan);
   color: #061426;
+}
+
+.sync-tool {
+  border-color: rgba(4, 105, 239, 0.45);
+  background: linear-gradient(180deg, #18233d, #11172a);
+}
+.sync-status-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #090e1a;
+  border: 1px solid var(--line);
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+.sync-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.sync-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+.sync-val {
+  font-weight: 700;
+  color: var(--coral);
+}
+.sync-val.ok {
+  color: var(--green);
+}
+.code-val {
+  color: var(--cyan);
+  font-family: monospace;
+  font-weight: 900;
+}
+.code-input {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--cyan);
+  background: #090e1a;
+}
+.link-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.change-room-box {
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .dot {
   width: 10px;

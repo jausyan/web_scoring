@@ -28,7 +28,10 @@ const round = computed(() => activeRoundOf(state.value[props.stage]))
         <span class="pts plus">+{{ round.plus }}</span>
         <span class="pts minus">−{{ round.minus }}</span>
       </div>
-      <span class="dot" :class="{ off: !connected }" :title="connected ? 'Terhubung' : 'Terputus'" />
+      <div class="conn-status" :title="connected ? 'Terhubung Realtime (Multi-Laptop Aktif)' : 'Mencoba Terhubung...'">
+        <span class="dot" :class="{ off: !connected }" />
+        <span class="dot-label">{{ connected ? 'LIVE' : 'CONNECTING' }}</span>
+      </div>
     </div>
   </header>
 </template>
@@ -121,9 +124,24 @@ const round = computed(() => activeRoundOf(state.value[props.stage]))
   background: #7a1f29;
   color: #ff9da8;
 }
+.conn-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: #080c18;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.dot-label {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
 .dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 10px var(--green);

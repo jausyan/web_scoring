@@ -73,7 +73,10 @@ const links = computed(() => [
 
     <div class="mode" :class="mode">
       <span class="status-dot" />
-      <span v-if="mode === 'firebase'">
+      <span v-if="mode === 'cloud'">
+        Mode Realtime Multi-Perangkat (Cloud) — skor tersinkron otomatis antar laptop & perangkat
+      </span>
+      <span v-else-if="mode === 'firebase'">
         Mode Online (Firebase) — sinkronisasi real-time multi-laptop
       </span>
       <span v-else>
