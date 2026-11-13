@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLive } from '../stores/live'
 import { useAuth } from '../stores/auth'
@@ -26,13 +26,14 @@ import { backend } from '../lib/backend'
 const router = useRouter()
 const { state, connected, mode } = useLive()
 const auth = useAuth()
+const userEmail = computed(() => auth.user.value?.email || '')
 
 const tab = ref('quarter')
-const screen = computed(() => state.value.display.screen)
+const screen = computed(() => state.value?.display?.screen || 'quarter-board')
 const last = computed(() => A.lastLog(state.value))
 const lastText = computed(() => {
   const e = last.value
-  if (!e) return ''
+  if (!e || !state.value) return ''
   const t = state.value[e.stage]?.teams?.[e.teamId]
   return `${t?.name ?? e.teamId} ${fmtDelta(e.delta)}`
 })
@@ -80,9 +81,9 @@ function changeRoom() {
 }
 
 /* ---- Perempat Final / Finalis Selection (Items 1, 2, 4) ---- */
-const qRanked = computed(() => rankTeams(state.value.quarter.teams))
-const qTiedGroups = computed(() => findTiedGroups(state.value.quarter.teams))
-const cutoffTie = computed(() => qTiedGroups.value.find((g) => g.spansCutoff))
+const qRanked = computed(() => rankTeams(state.value?.quarter?.teams || {}))
+const qTiedGroups = computed(() => findTiedGroups(state.value?.quarter?.teams || {}))
+const cutoffTie = computed(() => qTiedGroups.value?.find((g) => g.spansCutoff))
 
 // Selected team IDs to advance to Grand Final
 const selectedFinalists = ref([])
@@ -154,19 +155,19 @@ function resolveTiePriority(teamId, delta) {
 }
 
 /* ---- Grand Final & Winner (Item 3: Juara 1 Manual, 2 & 3 Otomatis by Point) ---- */
-const fin = computed(() => state.value.final)
-const fRanked = computed(() => rankTeams(fin.value.teams))
+const fin = computed(() => state.value?.final || {})
+const fRanked = computed(() => rankTeams(fin.value?.teams || {}))
 const target = ref(100)
 watch(
-  () => fin.value.target,
-  (v) => (target.value = v),
+  () => fin.value?.target,
+  (v) => (target.value = v ?? 100),
   { immediate: true },
 )
 
 // Manual Winner Selection
 const manualWinnerId = ref('')
 watch(
-  () => fin.value.winnerManualId || fin.value.podium?.[0],
+  () => fin.value?.winnerManualId || fin.value?.podium?.[0],
   (id) => {
     manualWinnerId.value = id || ''
   },
@@ -231,8 +232,8 @@ async function onImportJson(e) {
 /* ---- Settings ---- */
 const meta = ref({ title: '', subtitle: '' })
 watch(
-  () => state.value.meta,
-  (m) => (meta.value = { ...m }),
+  () => state.value?.meta,
+  (m) => (meta.value = { ...(m || {}) }),
   { immediate: true },
 )
 const newPin = ref('')
@@ -261,7 +262,7 @@ async function logout() {
     <header class="ah">
       <div class="brand">
         <img src="/logo-epw.png" alt="EPW" class="epw-mini-logo" />
-        <span class="comp-title">{{ state.meta.title || 'LCC EPW 2026' }}</span>
+        <span class="comp-title">{{ state?.meta?.title || 'LCC EPW 2026' }}</span>
         <span class="panel-tag">PANEL JURI</span>
       </div>
       <span class="badge" :class="connected ? 'online' : 'offline'">
@@ -273,7 +274,7 @@ async function logout() {
         :title="connected ? 'Terhubung Multi-Perangkat (Siap Real-Time)' : 'Mencoba Terhubung...'"
       />
       <span class="grow" />
-      <span class="muted email">{{ auth.user.value?.email }}</span>
+      <span class="muted email">{{ userEmail }}</span>
       <button
         class="btn sm blue"
         @click="doForceSync"

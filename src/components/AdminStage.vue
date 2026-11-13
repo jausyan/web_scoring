@@ -13,15 +13,15 @@ import * as A from '../lib/actions'
 const props = defineProps({ stage: { type: String, required: true } })
 const { state } = useLive()
 
-const data = computed(() => state.value[props.stage])
-const rounds = computed(() => sortedRounds(data.value.rounds))
+const data = computed(() => state.value?.[props.stage] || {})
+const rounds = computed(() => sortedRounds(data.value?.rounds || {}))
 const round = computed(() => activeRoundOf(data.value))
-const teams = computed(() => sortedByOrder(data.value.teams))
-const ranked = computed(() => rankTeams(data.value.teams))
+const teams = computed(() => sortedByOrder(data.value?.teams || {}))
+const ranked = computed(() => rankTeams(data.value?.teams || {}))
 const posMap = computed(() => Object.fromEntries(ranked.value.map((t) => [t.id, t.pos])))
 const custom = reactive({})
 
-const tiedGroups = computed(() => findTiedGroups(data.value.teams))
+const tiedGroups = computed(() => findTiedGroups(data.value?.teams || {}))
 const tiedScoreSet = computed(() => new Set(tiedGroups.value.map((g) => g.score)))
 
 const add = (id, d) => A.addScore(props.stage, id, d, round.value.id)

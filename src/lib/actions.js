@@ -17,7 +17,8 @@ export function addScore(stage, teamId, delta, roundId = null) {
 }
 
 export function lastLog(state) {
-  const keys = Object.keys(state.log || {}).sort()
+  if (!state || !state.log) return null
+  const keys = Object.keys(state.log).sort()
   const k = keys.at(-1)
   return k ? { key: k, ...state.log[k] } : null
 }
