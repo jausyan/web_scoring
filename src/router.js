@@ -8,8 +8,10 @@ import Login from './views/Login.vue'
 import Admin from './views/Admin.vue'
 
 const routes = [
-  { path: '/', component: Home, meta: { label: 'LCC EPW 2026' } },
+  { path: '/', component: Display, props: { filter: 'all' }, meta: { label: 'LIVE PROYEKTOR' } },
   { path: '/live', component: Display, props: { filter: 'all' }, meta: { label: 'LIVE PROYEKTOR' } },
+  { path: '/portal', component: Home, meta: { label: 'LCC EPW 2026' } },
+  { path: '/home', redirect: '/portal' },
   { path: '/perempat', component: Display, props: { filter: 'quarter' }, meta: { label: 'PEREMPAT FINAL' } },
   { path: '/final', component: Display, props: { filter: 'final' }, meta: { label: 'GRAND FINAL' } },
   { path: '/login', component: Login, meta: { label: 'LOGIN JURI' } },

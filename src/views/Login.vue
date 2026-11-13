@@ -161,7 +161,7 @@ async function doPin() {
           Mode lokal (demo): <b>{{ hint.email }}</b> / <b>{{ hint.password }}</b> · PIN
           <b>{{ hint.pin }}</b>
         </p>
-        <RouterLink to="/" class="back muted">← Kembali ke Beranda</RouterLink>
+        <RouterLink to="/" class="back muted">← Kembali ke Layar Live</RouterLink>
       </div>
     </div>
   </div>

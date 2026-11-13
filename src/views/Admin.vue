@@ -44,11 +44,12 @@ const copyMsg = ref('')
 const syncNotice = ref('')
 const lanIps = ref([])
 
-function getSecondDeviceUrl(path = '/live') {
+function getSecondDeviceUrl(path = '/') {
   if (typeof window === 'undefined') return ''
   const origin = window.location.origin
   const room = roomId.value || 'lcc_epw_2026'
-  return `${origin}${path}?room=${room}`
+  if (path === '/' && room === 'lcc_epw_2026') return origin
+  return `${origin}${path}${path.includes('?') ? '&' : '?'}room=${room}`
 }
 
 async function copyLink(url) {
@@ -294,7 +295,7 @@ async function logout() {
       >
         <F1Icon name="download" :size="15" /> Simpan .JSON
       </button>
-      <a href="/live" target="_blank" class="btn sm">
+      <a href="/" target="_blank" class="btn sm">
         <F1Icon name="telemetry" :size="15" /> Buka Layar Live
       </a>
       <button class="btn sm ghost" @click="logout">Keluar</button>
@@ -619,11 +620,12 @@ async function logout() {
         </div>
 
         <div class="link-box">
-          <label class="small"><b>Tautan Layar Proyektor untuk Laptop Kedua:</b></label>
+          <label class="small"><b>Alamat Layar Proyektor (Laptop 2 Langsung Masuk):</b></label>
           <div class="inline">
-            <input readonly class="input code-input" :value="getSecondDeviceUrl('/live')" />
-            <button class="btn sm primary" @click="copyLink(getSecondDeviceUrl('/live'))">Salin</button>
+            <input readonly class="input code-input" :value="getSecondDeviceUrl('/')" />
+            <button class="btn sm primary" @click="copyLink(getSecondDeviceUrl('/'))">Salin</button>
           </div>
+          <span class="small muted">Laptop proyektor cukup buka alamat utama website (tanpa perlu ketik sub-link), otomatis langsung menampilkan live scoring.</span>
         </div>
 
         <div class="link-box">
@@ -637,8 +639,8 @@ async function logout() {
         <div v-if="lanIps.length" class="link-box">
           <label class="small"><b>IP Jaringan Lokal (WiFi yang sama):</b></label>
           <div class="inline">
-            <input readonly class="input code-input" :value="`http://${lanIps[0]}:5173/live?room=${roomId}`" />
-            <button class="btn sm ghost" @click="copyLink(`http://${lanIps[0]}:5173/live?room=${roomId}`)">Salin</button>
+            <input readonly class="input code-input" :value="`http://${lanIps[0]}:5173${roomId === 'lcc_epw_2026' ? '' : '?room=' + roomId}`" />
+            <button class="btn sm ghost" @click="copyLink(`http://${lanIps[0]}:5173${roomId === 'lcc_epw_2026' ? '' : '?room=' + roomId}`)">Salin</button>
           </div>
         </div>
 
@@ -774,12 +776,14 @@ async function logout() {
       <div class="card tool">
         <h4>Tautan Layar Publik</h4>
         <p class="small muted">Buka tautan ini di laptop atau proyektor panggung:</p>
-        <code>/live</code
-        ><span class="small muted">mengikuti pilihan Layar Live di atas</span>
+        <code>/ (Utama)</code
+        ><span class="small muted">langsung layar proyektor live (mengikuti pilihan juri di atas)</span>
         <code>/perempat</code
-        ><span class="small muted">papan skor / klasemen perempat final</span>
+        ><span class="small muted">khusus papan skor / klasemen perempat final</span>
         <code>/final</code
-        ><span class="small muted">balapan lintasan / podium grand final</span>
+        ><span class="small muted">khusus balapan lintasan / podium grand final</span>
+        <code>/portal</code
+        ><span class="small muted">portal pilihan menu</span>
       </div>
     </div>
   </div>

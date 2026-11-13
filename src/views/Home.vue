@@ -10,7 +10,7 @@ const compTitle = computed(() => state.value.meta.title || 'LCC EPW 2026')
 
 const links = computed(() => [
   {
-    to: '/live',
+    to: '/',
     code: 'LIVE',
     t: 'Layar Proyektor',
     d: 'Tampilan panggung utama — otomatis mengikuti layar yang diaktifkan juri.',

@@ -53,7 +53,8 @@ onBeforeUnmount(() => { window.removeEventListener('mousemove', onMove); clearTi
     <div v-else class="loading"><span class="brand"><span class="logo">LCC</span></span> Memuat…</div>
     <Transition name="fade">
       <div v-if="showFs" class="tools">
-        <RouterLink to="/" class="btn sm ghost">Beranda</RouterLink>
+        <RouterLink to="/portal" class="btn sm ghost" title="Portal Menu">Portal</RouterLink>
+        <RouterLink to="/admin" class="btn sm ghost" title="Panel Juri">Panel Juri</RouterLink>
         <button class="btn sm" @click="toggleFs">
           <F1Icon name="fullscreen" :size="14" /> Layar Penuh
         </button>
