@@ -24,11 +24,22 @@ export const TEAM_COLORS = [
 ]
 
 export const FINAL_COLORS = [
-  '#0469ef', // Team 1: Electric Royal Blue
-  '#02c9fb', // Team 2: Sky Cyan
-  '#fa186e', // Team 3: Fuchsia Pink
-  '#fb4325', // Team 4: Electric Coral
-  '#f69632', // Team 5: Amber Orange
+  '#0469ef', // Electric Royal Blue
+  '#02c9fb', // Sky Cyan
+  '#fa186e', // Fuchsia Pink
+  '#fb4325', // Electric Coral
+  '#f69632', // Amber Orange
+  '#6a2cd7', // Deep Purple
+  '#00e5a3', // Neon Mint Green
+  '#ffd400', // Racing Gold Yellow
+  '#9d4edd', // Bright Violet
+  '#ff0055', // Crimson Rose
+  '#00b4d8', // Vivid Ocean Cyan
+  '#ff7b00', // Blaze Orange
+  '#70e000', // Lime Green
+  '#f72585', // Magenta Pop
+  '#4361ee', // Indigo Blue
+  '#4cc9f0', // Ice Blue
 ]
 
 export const SCREENS = {
@@ -76,6 +87,7 @@ export function defaultState() {
         r2: { name: 'Babak 2', plus: 10, minus: 3, order: 2 },
       },
       activeRound: 'r1',
+      finalistsQuota: 5,
     },
     final: {
       teams: finalTeams,

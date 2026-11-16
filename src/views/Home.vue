@@ -27,7 +27,7 @@ const links = computed(() => [
     to: '/final',
     code: 'GF',
     t: 'Grand Final',
-    d: 'Balapan F1 5 finalis, garis finish, dan podium juara.',
+    d: 'Balapan F1 finalis, garis finish, dan podium juara.',
     icon: 'car',
   },
   {

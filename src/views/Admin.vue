@@ -80,23 +80,46 @@ function changeRoom() {
   }
 }
 
-/* ---- Perempat Final / Finalis Selection (Items 1, 2, 4) ---- */
+/* ---- Perempat Final / Finalis Selection (Custom Kuota Bebas) ---- */
+const finalistsQuota = computed(() => Number(state.value?.quarter?.finalistsQuota) || 5)
+const quotaInput = ref(finalistsQuota.value)
+watch(
+  finalistsQuota,
+  (v) => {
+    quotaInput.value = v
+  },
+  { immediate: true },
+)
+
+function updateQuota(val) {
+  const n = Math.max(1, Math.min(qRanked.value.length || 20, Number(val) || 5))
+  quotaInput.value = n
+  A.setFinalistsQuota(n)
+}
+
+function setQuickQuota(n) {
+  updateQuota(n)
+  selectTopN(n)
+}
+
 const qRanked = computed(() => rankTeams(state.value?.quarter?.teams || {}))
-const qTiedGroups = computed(() => findTiedGroups(state.value?.quarter?.teams || {}))
+const qTiedGroups = computed(() =>
+  findTiedGroups(state.value?.quarter?.teams || {}, finalistsQuota.value),
+)
 const cutoffTie = computed(() => qTiedGroups.value?.find((g) => g.spansCutoff))
 
 // Selected team IDs to advance to Grand Final
 const selectedFinalists = ref([])
 
-// Initialize or update selection with top 5 by default
-function selectTop5() {
-  selectedFinalists.value = qRanked.value.slice(0, 5).map((t) => t.id)
+function selectTopN(count = finalistsQuota.value) {
+  const n = Math.max(1, Number(count) || 5)
+  selectedFinalists.value = qRanked.value.slice(0, n).map((t) => t.id)
 }
 
 watch(
-  qRanked,
+  [qRanked, finalistsQuota],
   () => {
-    if (!selectedFinalists.value.length) selectTop5()
+    if (!selectedFinalists.value.length) selectTopN(finalistsQuota.value)
   },
   { immediate: true },
 )
@@ -117,30 +140,32 @@ function toggleFinalist(id) {
   if (idx !== -1) {
     selectedFinalists.value.splice(idx, 1)
   } else {
-    if (selectedFinalists.value.length >= 5) {
-      alert('Maksimal 5 tim untuk Grand Final. Hilangkan centang tim lain terlebih dahulu.')
-      return
-    }
     selectedFinalists.value.push(id)
   }
 }
 
 function applySelectedFinalists() {
-  if (selectedFinalists.value.length !== 5) {
-    if (
-      !confirm(
-        `Anda baru memilih ${selectedFinalists.value.length} tim (idealnya 5 tim). Lanjutkan penetapan finalis?`,
-      )
-    )
-      return
+  const count = selectedFinalists.value.length
+  if (!count) {
+    alert('Pilih minimal 1 tim untuk Grand Final.')
+    return
   }
+
+  const quota = finalistsQuota.value
+  let promptMsg = `Tetapkan ${count} tim berikut untuk Grand Final?\n\n`
+  if (count !== quota) {
+    promptMsg = `Catatan: Kuota target adalah ${quota} tim, namun Anda memilih ${count} tim.\n\nTetap tetapkan ${count} tim terpilih ini ke Grand Final?\n\n`
+  }
+
   const chosenNames = selectedFinalists.value
-    .map((id, i) => `${i + 1}. ${state.value.quarter.teams[id]?.name || id}`)
+    .map((id, i) => `${i + 1}. ${state.value.quarter?.teams?.[id]?.name || id}`)
     .join('\n')
 
   if (
     confirm(
-      `Tetapkan tim berikut sebagai 5 Besar Grand Final?\n\n${chosenNames}\n\nData Grand Final sebelumnya akan direset dengan tim ini.`,
+      promptMsg +
+        chosenNames +
+        '\n\nData Grand Final sebelumnya akan direset dengan tim ini.',
     )
   ) {
     A.promoteSelectedTeams(state.value, selectedFinalists.value)
@@ -369,7 +394,7 @@ async function logout() {
         </div>
         <p class="tie-desc">
           Tim berikut memiliki skor sama (<b>{{ cutoffTie.score }} poin</b>) pada
-          posisi kualifikasi 5 besar. Gunakan tombol untuk menentukan keunggulan
+          posisi kualifikasi {{ finalistsQuota }} besar. Gunakan tombol untuk menentukan keunggulan
           tie-break:
         </p>
         <div class="tie-team-list">
@@ -377,7 +402,7 @@ async function logout() {
             v-for="t in cutoffTie.teams"
             :key="t.id"
             class="tie-team-row"
-            :class="{ q: t.pos <= 5 }"
+            :class="{ q: t.pos <= finalistsQuota }"
           >
             <span class="badge-pos">P{{ t.pos }}</span>
             <span class="t-name">{{ t.name }}</span>
@@ -406,28 +431,66 @@ async function logout() {
       <!-- Finalist Selector / Management: Show All Teams (Items 1 & 4) -->
       <div class="card tool finalist-manager">
         <div class="fm-header">
-          <div>
-            <h4>Penetapan Peserta Grand Final (5 Besar)</h4>
+          <div class="fm-title-area">
+            <h4>Penetapan Peserta Grand Final</h4>
             <p class="muted small">
-              Centang 5 tim yang akan bertanding di Grand Final. Tim dapat dipilih
-              otomatis berdasarkan skor atau ditentukan secara manual oleh panitia.
+              Tentukan kuota jumlah tim yang lolos (bebas custom: 5, 8, 10, dll) dan pilih tim yang akan bertanding di Grand Final.
             </p>
           </div>
-          <div class="fm-actions">
-            <span class="counter" :class="{ ok: selectedFinalists.length === 5 }">
-              Terpilih: <b>{{ selectedFinalists.length }}</b> / 5 Tim
-            </span>
-            <button class="btn sm" @click="selectTop5">
-              Pilih Otomatis 5 Besar
-            </button>
-            <button
-              class="btn primary"
-              :disabled="!selectedFinalists.length"
-              @click="applySelectedFinalists"
-            >
-              <F1Icon name="flag" :size="16" /> Terapkan ke Grand Final
-            </button>
+          <div class="quota-box">
+            <span class="quota-label">Target Lolos:</span>
+            <input
+              v-model.number="quotaInput"
+              type="number"
+              min="1"
+              :max="qRanked.length || 20"
+              class="input quota-num"
+              @change="updateQuota(quotaInput)"
+              title="Atur jumlah tim yang lolos ke final"
+            />
+            <span class="quota-unit">Tim</span>
+            <div class="preset-buttons">
+              <button
+                v-for="p in [3, 5, 8, 10]"
+                :key="p"
+                class="btn xs"
+                :class="{ active: finalistsQuota === p }"
+                @click="setQuickQuota(p)"
+              >
+                {{ p }} Besar
+              </button>
+              <button
+                class="btn xs ghost"
+                @click="setQuickQuota(qRanked.length || 20)"
+                title="Loloskan seluruh tim"
+              >
+                Semua
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div class="fm-actions">
+          <span class="counter" :class="{ ok: selectedFinalists.length === finalistsQuota }">
+            Terpilih: <b>{{ selectedFinalists.length }}</b> / {{ finalistsQuota }} Tim
+          </span>
+          <button class="btn sm" @click="selectTopN(finalistsQuota)">
+            Pilih Otomatis {{ finalistsQuota }} Besar
+          </button>
+          <button
+            class="btn sm ghost"
+            @click="selectedFinalists = []"
+            title="Kosongkan pilihan"
+          >
+            Hapus Pilihan
+          </button>
+          <button
+            class="btn primary"
+            :disabled="!selectedFinalists.length"
+            @click="applySelectedFinalists"
+          >
+            <F1Icon name="flag" :size="16" /> Terapkan ke Grand Final ({{ selectedFinalists.length }} Tim)
+          </button>
         </div>
 
         <!-- Full Table: Diliatin semua baik yg tereliminasi atau tidak (Item 4) -->
@@ -449,8 +512,8 @@ async function logout() {
                 :key="t.id"
                 :class="{
                   selected: selectedFinalists.includes(t.id),
-                  qualified: t.pos <= 5,
-                  eliminated: t.pos > 5,
+                  qualified: t.pos <= finalistsQuota,
+                  eliminated: t.pos > finalistsQuota,
                 }"
               >
                 <td class="text-center">
@@ -462,7 +525,7 @@ async function logout() {
                   />
                 </td>
                 <td class="text-center">
-                  <span class="tbl-pos" :class="{ top: t.pos <= 5 }">
+                  <span class="tbl-pos" :class="{ top: t.pos <= finalistsQuota }">
                     P{{ t.pos }}
                   </span>
                 </td>
@@ -476,9 +539,9 @@ async function logout() {
                 <td>
                   <span
                     class="tbl-status-badge"
-                    :class="t.pos <= 5 ? 'status-q' : 'status-out'"
+                    :class="t.pos <= finalistsQuota ? 'status-q' : 'status-out'"
                   >
-                    {{ t.pos <= 5 ? '5 BESAR (LOLOS)' : 'TERELIMINASI' }}
+                    {{ t.pos <= finalistsQuota ? 'LOLOS (P' + t.pos + ')' : 'TERELIMINASI' }}
                   </span>
                 </td>
                 <td>
@@ -1059,6 +1122,44 @@ async function logout() {
   font-style: italic;
   text-transform: uppercase;
   color: var(--cyan);
+}
+.fm-title-area {
+  flex: 1;
+  min-width: 240px;
+}
+.quota-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #090e1a;
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.quota-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--cyan);
+  text-transform: uppercase;
+  font-style: italic;
+}
+.quota-num {
+  width: 58px;
+  text-align: center;
+  padding: 4px 6px;
+  font-weight: 900;
+  font-size: 15px;
+  color: #fff;
+}
+.quota-unit {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.preset-buttons {
+  display: flex;
+  gap: 4px;
 }
 .fm-actions {
   display: flex;

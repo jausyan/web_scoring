@@ -30,7 +30,12 @@ function progress(t) {
   <div class="screen">
     <TopBar stage="final" title="Grand Final" />
     <main class="main">
-      <section class="track">
+      <section
+        class="track"
+        :style="{
+          '--carw': lanes.length > 6 ? 'clamp(65px, 6.5vw, 120px)' : 'clamp(110px, 11vw, 210px)',
+        }"
+      >
         <div class="kerb edge" />
         <div class="lanes">
           <div class="startline" />
@@ -136,7 +141,7 @@ function progress(t) {
 }
 .lane-name {
   position: absolute; left: 18%; right: 12%; top: 50%; transform: translateY(-50%); text-align: center;
-  font-weight: 900; font-style: italic; text-transform: uppercase; font-size: clamp(28px, 5vh, 70px);
+  font-weight: 900; font-style: italic; text-transform: uppercase; font-size: clamp(20px, 3.8vh, 60px);
   color: rgba(255, 255, 255, 0.05); white-space: nowrap; overflow: hidden; pointer-events: none;
 }
 
@@ -161,7 +166,7 @@ function progress(t) {
 
 .tag {
   position: absolute; bottom: 92%; left: 4%; display: flex; align-items: center; white-space: nowrap;
-  font-size: clamp(11px, 1.05vw, 18px); font-weight: 700; border-radius: 4px; overflow: visible;
+  font-size: clamp(9px, 0.95vw, 16px); font-weight: 700; border-radius: 4px; overflow: visible;
   background: #090e1a; border-left: 5px solid var(--c); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
   border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
 }
@@ -201,12 +206,35 @@ function progress(t) {
 @keyframes winIn { from { transform: translate(-50%, -50%) scale(0.3); opacity: 0; } }
 
 /* ---------- timing tower ---------- */
-.tower { background: #0b0f1a; border-left: 3px solid var(--blue); display: flex; flex-direction: column; padding: 14px; gap: 10px; }
-.th { font-weight: 900; font-style: italic; font-size: clamp(16px, 1.6vw, 26px); display: flex; gap: 8px; align-items: center; color: var(--cyan); }
-.trows { display: flex; flex-direction: column; gap: 6px; position: relative; }
+.tower {
+  background: #0b0f1a;
+  border-left: 3px solid var(--blue);
+  display: flex;
+  flex-direction: column;
+  padding: clamp(8px, 1.2vw, 14px);
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.th { font-weight: 900; font-style: italic; font-size: clamp(15px, 1.5vw, 24px); display: flex; gap: 8px; align-items: center; color: var(--cyan); flex: none; }
+.trows {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(3px, 0.5vh, 6px);
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
 .trow {
-  display: flex; align-items: center; background: #131b2e; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
-  font-size: clamp(14px, 1.4vw, 24px); height: clamp(40px, 6.5vh, 70px);
+  display: flex;
+  align-items: center;
+  background: #131b2e;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: clamp(11px, 1.2vw, 22px);
+  flex: 1;
+  min-height: clamp(26px, 3.4vh, 60px);
 }
 .trow.p1 { background: linear-gradient(90deg, #2b220a, #131b2e); border-color: var(--gold); }
 .trow .p { width: 2em; align-self: stretch; display: grid; place-items: center; background: #fff; color: #070a12; font-weight: 900; font-style: italic; }

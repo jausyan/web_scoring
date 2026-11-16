@@ -259,6 +259,11 @@ select {
   box-shadow: 0 0 12px rgba(2, 201, 251, 0.4);
 }
 
+.btn.xs {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 .btn.sm {
   padding: 5px 10px;
   font-size: 12px;

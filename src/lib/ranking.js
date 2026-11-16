@@ -43,7 +43,8 @@ export const fmtDelta = (n) => (n > 0 ? `+${n}` : `${n}`)
  * Detect teams with identical scores.
  * Returns array of tie groups: [{ score: 80, count: 2, teams: [...] }]
  */
-export function findTiedGroups(teams = {}) {
+export function findTiedGroups(teams = {}, cutoff = 5) {
+  const c = Math.max(1, Number(cutoff) || 5)
   const ranked = rankTeams(teams)
   const map = {}
   for (const t of ranked) {
@@ -56,8 +57,8 @@ export function findTiedGroups(teams = {}) {
       score: Number(score),
       count: list.length,
       teams: list,
-      // Check if this tie spans across the cutoff (pos <= 5 and pos > 5)
-      spansCutoff: list.some((t) => t.pos <= 5) && list.some((t) => t.pos > 5),
+      // Check if this tie spans across the cutoff (pos <= cutoff and pos > cutoff)
+      spansCutoff: list.some((t) => t.pos <= c) && list.some((t) => t.pos > c),
     }))
     .sort((a, b) => b.score - a.score)
 }

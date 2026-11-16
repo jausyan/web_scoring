@@ -10,8 +10,9 @@ const leader = computed(() => ranked.value[0]?.score ?? 0)
 const half = computed(() => Math.ceil(ranked.value.length / 2))
 const columns = computed(() => [ranked.value.slice(0, half.value), ranked.value.slice(half.value)])
 const total = computed(() => ranked.value.length)
+const cutoff = computed(() => Number(state.value?.quarter?.finalistsQuota) || 5)
 
-const tiedGroups = computed(() => findTiedGroups(state.value.quarter.teams))
+const tiedGroups = computed(() => findTiedGroups(state.value.quarter.teams, cutoff.value))
 const tiedScoreMap = computed(() => {
   const map = {}
   for (const g of tiedGroups.value) {
@@ -32,8 +33,8 @@ const tiedScoreMap = computed(() => {
           <div
             class="row"
             :class="{
-              q: t.pos <= 5,
-              eliminated: t.pos > 5,
+              q: t.pos <= cutoff,
+              eliminated: t.pos > cutoff,
               p1: t.pos === 1,
               hasTie: !!tiedScoreMap[t.id],
             }"
@@ -49,7 +50,7 @@ const tiedScoreMap = computed(() => {
             </div>
 
             <!-- Item 4: Diliatin semua baik yg tereliminasi atau tidak -->
-            <div v-if="t.pos <= 5" class="tag q-tag">LOLOS FINAL</div>
+            <div v-if="t.pos <= cutoff" class="tag q-tag">LOLOS FINAL</div>
             <div v-else class="tag out-tag">TERELIMINASI</div>
 
             <div class="gap mono">
@@ -57,9 +58,9 @@ const tiedScoreMap = computed(() => {
             </div>
             <div class="score mono">{{ t.score }}</div>
           </div>
-          <div v-if="t.pos === 5" class="cut">
+          <div v-if="t.pos === cutoff" class="cut">
             <span class="cut-line" />
-            <span class="cut-text">BATAS KUALIFIKASI GRAND FINAL (5 BESAR)</span>
+            <span class="cut-text">BATAS KUALIFIKASI GRAND FINAL ({{ cutoff }} BESAR)</span>
             <span class="cut-line" />
           </div>
         </template>

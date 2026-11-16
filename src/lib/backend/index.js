@@ -1,8 +1,8 @@
-import { createFirebaseBackend } from './firebase'
-import { createCloudBackend } from './cloud'
-import { defaultState } from '../defaultState'
+import { createFirebaseBackend } from './firebase.js'
+import { createCloudBackend } from './cloud.js'
+import { defaultState } from '../defaultState.js'
 
-const env = import.meta.env
+const env = import.meta?.env || {}
 const firebaseConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY,
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,

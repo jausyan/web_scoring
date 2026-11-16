@@ -1,6 +1,6 @@
-import { backend } from './backend'
-import { rankTeams, sortedRounds, computeFinalPodium } from './ranking'
-import { defaultState, FINAL_COLORS } from './defaultState'
+import { backend } from './backend/index.js'
+import { rankTeams, sortedRounds, computeFinalPodium } from './ranking.js'
+import { defaultState, FINAL_COLORS } from './defaultState.js'
 
 const INC = (n) => ({ __inc: n })
 const NOW = { __now: true }
@@ -77,20 +77,22 @@ export function resetScores(state, stage) {
   return backend.update(u)
 }
 
-/** Automatically promote top 5 from quarterfinal */
-export function promoteTop5(state) {
-  const top = rankTeams(state.quarter.teams).slice(0, 5)
+/** Automatically promote top N from quarterfinal */
+export function promoteTopN(state, n = 5) {
+  const count = Math.max(1, Number(n) || 5)
+  const top = rankTeams(state.quarter?.teams || {}).slice(0, count)
   return promoteSelectedTeams(
     state,
     top.map((t) => t.id),
   )
 }
+export const promoteTop5 = (state) => promoteTopN(state, 5)
 
-/** Promote manually specified team IDs (up to 5) from quarterfinal into final */
+/** Promote custom list of team IDs from quarterfinal into final */
 export function promoteSelectedTeams(state, teamIds = []) {
   const teams = {}
-  teamIds.slice(0, 5).forEach((id, i) => {
-    const qt = state.quarter.teams[id] || {}
+  teamIds.forEach((id, i) => {
+    const qt = state.quarter?.teams?.[id] || {}
     teams[`f${i + 1}`] = {
       name: qt.name || `Finalis ${i + 1}`,
       number: qt.order || i + 1,
@@ -109,6 +111,9 @@ export function promoteSelectedTeams(state, teamIds = []) {
   for (const [k, e] of Object.entries(state.log || {})) if (e.stage === 'final') u[`log/${k}`] = null
   return backend.update(u)
 }
+
+export const setFinalistsQuota = (n) =>
+  backend.update({ 'quarter/finalistsQuota': Math.max(1, Number(n) || 5) })
 
 export const setScreen = (screen) =>
   backend.update({ 'display/screen': screen, 'display/seq': INC(1) })
