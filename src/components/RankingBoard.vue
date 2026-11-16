@@ -36,7 +36,7 @@ const tiedScoreMap = computed(() => {
               q: t.pos <= cutoff,
               eliminated: t.pos > cutoff,
               p1: t.pos === 1,
-              hasTie: !!tiedScoreMap[t.id],
+              hasTie: !!tiedScoreMap[t.id] && t.score > 0,
             }"
             :style="{ animationDelay: (total - t.pos) * 0.08 + 's' }"
           >

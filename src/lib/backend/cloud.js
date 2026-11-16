@@ -14,6 +14,7 @@ const DEFAULT_PIN = import.meta?.env?.VITE_LOCAL_PIN || '1234'
 const BROKER_URLS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
 ]
 
 const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)))
@@ -158,8 +159,40 @@ export function createCloudBackend(defaultState) {
 
   let remotePinHash = null
   let isConnected = false
-  let brokerIdx = 0
-  let isConnecting = false
+
+  // ── Sync model ───────────────────────────────────────────────────────────
+  // • Every change is a delta with a unique id, sent through ALL brokers at once.
+  //   Each laptop applies an id exactly once (dedupe), so one flaky broker
+  //   can't split laptops apart, and duplicates can't double-count.
+  // • The retained full snapshot is ONLY used to bootstrap after (re)connect.
+  //   It never overwrites live state afterwards (that's what used to eat taps).
+  let synced = false
+  let bootstrapTimer = null
+  let pickTimer = null
+  let bestSnapshot = null
+  const early = [] // deltas from others that arrived before bootstrap
+  const pending = new Map() // own deltas not yet echoed back by any broker
+  const seen = new Set()
+  const seenOrder = []
+  const markSeen = (id) => {
+    if (!id || seen.has(id)) return false
+    seen.add(id)
+    seenOrder.push(id)
+    if (seenOrder.length > 3000) seen.delete(seenOrder.shift())
+    return true
+  }
+  let msgSeq = 0
+  const newMsgId = () => `${clientId}.${Date.now().toString(36)}.${(msgSeq++).toString(36)}`
+
+  const applyUpdates = (updates, now) => {
+    for (const [k, v] of Object.entries(updates)) {
+      if (v && typeof v === 'object' && '__inc' in v) {
+        setPath(state, k, (Number(getPath(state, k)) || 0) + v.__inc)
+      } else {
+        setPath(state, k, clone(resolveNow(v, now)))
+      }
+    }
+  }
 
   const subs = new Set()
   const authSubs = new Set()
@@ -189,121 +222,183 @@ export function createCloudBackend(defaultState) {
     }
   }
 
-  // Connect to MQTT Broker
-  let client = null
-  let reconnectTimer = null
+  // ── Broker connections (all in parallel) ────────────────────────────────
+  const conns = BROKER_URLS.map((url) => ({ url, client: null, up: false }))
+  const anyUp = () => conns.some((c) => c.up)
 
-  function connectMqtt() {
-    if (isConnecting) return
-    isConnecting = true
+  function refreshConn() {
+    const up = anyUp()
+    if (!up) {
+      synced = false
+      bestSnapshot = null
+      clearTimeout(bootstrapTimer)
+      clearTimeout(pickTimer)
+      bootstrapTimer = pickTimer = null
+    }
+    setConnected(up)
+  }
 
-    const brokerUrl = BROKER_URLS[brokerIdx % BROKER_URLS.length]
-
-    try {
-      if (client) {
-        try { client.end(true) } catch {}
+  function pubAll(topic, payload, retain = false) {
+    const msg = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    for (const c of conns) {
+      if (!c.up || !c.client) continue
+      try {
+        c.client.publish(topic, msg, { qos: 1, retain })
+      } catch (e) {
+        console.error('[LCC Realtime] publish error:', c.url, e)
       }
-
-      client = mqtt.connect(brokerUrl, {
-        clientId,
-        clean: true,
-        connectTimeout: 8000,
-        reconnectPeriod: 4000,
-        keepalive: 30,
-      })
-
-      client.on('connect', () => {
-        isConnecting = false
-        setConnected(true)
-
-        client.subscribe([TOPIC_STATE, TOPIC_UPDATE, TOPIC_PIN], { qos: 1 }, (err) => {
-          if (err) {
-            console.error('[LCC Realtime] Subscribe error:', err)
-          } else {
-            // If local state doesn't exist yet, we wait for retained message from broker.
-            // If no message arrives after 1.5s and state is null, initialize with defaultState.
-            if (!state) {
-              setTimeout(() => {
-                if (!state) {
-                  state = defaultState()
-                  saveLocal()
-                  publishFullState(state, true)
-                }
-              }, 1500)
-            }
-          }
-        })
-      })
-
-      client.on('message', (topic, payload) => {
-        try {
-          const text = payload.toString()
-          if (!text) return
-
-          if (topic === TOPIC_PIN) {
-            remotePinHash = text.trim()
-            storage.set(PIN_KEY, remotePinHash)
-            return
-          }
-
-          if (topic === TOPIC_STATE) {
-            const incoming = JSON.parse(text)
-            if (incoming && typeof incoming === 'object' && incoming.quarter) {
-              state = incoming
-              saveLocal()
-            }
-            return
-          }
-
-          if (topic === TOPIC_UPDATE) {
-            const data = JSON.parse(text)
-            // Echo prevention: don't re-apply our own updates
-            if (data && data.senderId === clientId) return
-
-            if (data && data.updates && state) {
-              const now = data.ts || Date.now()
-              for (const [k, v] of Object.entries(data.updates)) {
-                if (v && typeof v === 'object' && '__inc' in v) {
-                  setPath(state, k, (Number(getPath(state, k)) || 0) + v.__inc)
-                } else {
-                  setPath(state, k, clone(resolveNow(v, now)))
-                }
-              }
-              saveLocal()
-            }
-          }
-        } catch (e) {
-          console.error('[LCC Realtime] Message handle error:', e)
-        }
-      })
-
-      client.on('offline', () => setConnected(false))
-      client.on('close', () => setConnected(false))
-      client.on('error', (err) => {
-        console.warn(`[LCC Realtime] Broker ${brokerUrl} error:`, err?.message || err)
-        setConnected(false)
-        isConnecting = false
-
-        // Failover to secondary broker
-        clearTimeout(reconnectTimer)
-        reconnectTimer = setTimeout(() => {
-          brokerIdx++
-          connectMqtt()
-        }, 3000)
-      })
-    } catch (e) {
-      isConnecting = false
-      setConnected(false)
     }
   }
 
-  // Start connection
-  connectMqtt()
+  function connectBroker(conn, i) {
+    try {
+      const client = mqtt.connect(conn.url, {
+        clientId: `${clientId}_${i}`,
+        clean: true,
+        connectTimeout: 15000,
+        reconnectPeriod: 3000,
+        keepalive: 30,
+      })
+      conn.client = client
 
-  // Listen for storage changes across tabs of same browser
+      client.on('connect', () => {
+        conn.up = true
+        refreshConn()
+        client.subscribe([TOPIC_STATE, TOPIC_UPDATE, TOPIC_PIN], { qos: 1 }, (err) => {
+          if (err) return console.error('[LCC Realtime] Subscribe error:', conn.url, err)
+          if (!synced) {
+            if (!bootstrapTimer) bootstrapTimer = setTimeout(() => finishBootstrap(bestSnapshot), 2500)
+            return
+          }
+          // Already live via another broker: resend unconfirmed taps + refresh this broker's snapshot.
+          for (const [id, p] of pending) {
+            try {
+              client.publish(TOPIC_UPDATE, JSON.stringify({ id, senderId: clientId, updates: p.updates, ts: p.ts }), { qos: 1 })
+            } catch {}
+          }
+          publishFullState()
+        })
+      })
+
+      client.on('message', handleMessage)
+
+      const down = () => {
+        if (conn.up) {
+          conn.up = false
+          refreshConn()
+        }
+      }
+      client.on('offline', down)
+      client.on('close', down)
+      client.on('error', (err) => {
+        console.warn(`[LCC Realtime] Broker ${conn.url} error:`, err?.message || err)
+        down()
+      })
+    } catch (e) {
+      console.warn('[LCC Realtime] connect failed:', conn.url, e)
+    }
+  }
+
+  function handleMessage(topic, payload) {
+    try {
+      const text = payload.toString()
+      if (!text) return
+
+      if (topic === TOPIC_PIN) {
+        remotePinHash = text.trim()
+        storage.set(PIN_KEY, remotePinHash)
+        return
+      }
+
+      if (topic === TOPIC_STATE) {
+        if (synced) return
+        const incoming = JSON.parse(text)
+        if (!incoming || typeof incoming !== 'object' || !incoming.quarter) return
+        // Brokers may hold snapshots of different age: pick the freshest one.
+        if (!bestSnapshot || (incoming._ts || 0) > (bestSnapshot._ts || 0)) bestSnapshot = incoming
+        if (!pickTimer) pickTimer = setTimeout(() => finishBootstrap(bestSnapshot), 700)
+        return
+      }
+
+      if (topic === TOPIC_UPDATE) {
+        const data = JSON.parse(text)
+        if (!data) return
+        if (data.senderId === clientId) {
+          if (data.id) pending.delete(data.id) // confirmed by a broker
+          return
+        }
+        if (data.id && !markSeen(data.id)) return // already applied via another broker
+
+        // Explicit full replacement (reset / JSON import / force sync)
+        if (data.replace && typeof data.replace === 'object' && data.replace.quarter) {
+          if (!synced) return finishBootstrap(data.replace)
+          state = stripMeta(data.replace)
+          saveLocal()
+          return
+        }
+
+        if (!data.updates) return
+        if (!synced) {
+          early.push({ id: data.id, updates: data.updates, ts: data.ts || Date.now() })
+          return
+        }
+        if (!state) state = defaultState()
+        applyUpdates(data.updates, data.ts || Date.now())
+        saveLocal()
+        // Every laptop refreshes the snapshot so the last one written has ALL deltas.
+        publishFullState()
+      }
+    } catch (e) {
+      console.error('[LCC Realtime] Message handle error:', e)
+    }
+  }
+
+  function stripMeta(s) {
+    const c = clone(s)
+    if (c) {
+      delete c._sender
+      delete c._ts
+      delete c._applied
+    }
+    return c
+  }
+
+  /** Once per (re)connect: adopt the freshest snapshot, then replay anything it doesn't include. */
+  function finishBootstrap(incoming) {
+    if (synced) return
+    synced = true
+    clearTimeout(bootstrapTimer)
+    clearTimeout(pickTimer)
+    bootstrapTimer = pickTimer = null
+    bestSnapshot = null
+
+    const applied = new Set(incoming?._applied || [])
+    if (incoming) {
+      state = stripMeta(incoming)
+      for (const id of applied) markSeen(id)
+    }
+    if (!state) state = defaultState()
+
+    // Others' deltas that raced the snapshot
+    for (const d of early.splice(0)) if (!d.id || !applied.has(d.id)) applyUpdates(d.updates, d.ts)
+    // Our own taps that the snapshot doesn't contain yet (e.g. made while offline)
+    for (const [id, p] of pending) {
+      if (applied.has(id)) pending.delete(id)
+      else if (incoming) applyUpdates(p.updates, p.ts)
+    }
+    saveLocal()
+    for (const [id, p] of pending) pubAll(TOPIC_UPDATE, { id, senderId: clientId, updates: p.updates, ts: p.ts })
+    if (pending.size || !incoming) publishFullState()
+  }
+
+  // Start connections to every broker
+  conns.forEach(connectBroker)
+
+  // Listen for storage changes across tabs of same browser (only matters when offline;
+  // while connected every tab receives the deltas itself).
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', (e) => {
-      if (e.key === STATE_KEY) {
+      if (e.key === STATE_KEY && !isConnected) {
         state = load()
         emit()
       }
@@ -316,9 +411,8 @@ export function createCloudBackend(defaultState) {
       .then((r) => (r.ok ? r.json() : null))
       .then((diskState) => {
         if (diskState && typeof diskState === 'object' && diskState.quarter && !state) {
-          state = diskState
+          state = stripMeta(diskState)
           saveLocal()
-          publishFullState(state, true)
         }
       })
       .catch(() => {})
@@ -329,42 +423,43 @@ export function createCloudBackend(defaultState) {
     try {
       const es = new EventSource('/api/scores/stream')
       es.onmessage = (ev) => {
+        // LAN fallback only: while MQTT is live it is the source of truth.
+        if (isConnected) return
         try {
           const incoming = JSON.parse(ev.data)
           if (incoming && typeof incoming === 'object' && incoming.quarter) {
-            state = incoming
+            state = stripMeta(incoming)
             storage.set(STATE_KEY, JSON.stringify(state))
             emit()
-            setConnected(true)
           }
         } catch {}
       }
-      es.onopen = () => setConnected(true)
     } catch {}
   }
 
   let publishTimer = null
-  function publishFullState(st, retain = true) {
-    if (!client || !isConnected) return
+  function publishFullState() {
+    if (!anyUp() || !synced) return
     clearTimeout(publishTimer)
+    // Snapshot is only for laptops that join/reload later; debounce so a burst of taps sends one.
     publishTimer = setTimeout(() => {
-      try {
-        const payload = JSON.stringify(st)
-        client.publish(TOPIC_STATE, payload, { qos: 1, retain })
-      } catch (e) {
-        console.error('[LCC Realtime] publish error:', e)
-      }
-    }, 150)
+      if (!state) return
+      pubAll(TOPIC_STATE, { ...state, _sender: clientId, _ts: Date.now(), _applied: seenOrder.slice(-500) }, true)
+    }, 600 + Math.floor(Math.random() * 600))
   }
 
   function publishDelta(updates, now) {
-    if (!client || !isConnected) return
-    try {
-      const msg = JSON.stringify({ senderId: clientId, updates, ts: now })
-      client.publish(TOPIC_UPDATE, msg, { qos: 1, retain: false })
-    } catch (e) {
-      console.error('[LCC Realtime] delta publish error:', e)
-    }
+    const id = newMsgId()
+    markSeen(id)
+    pending.set(id, { updates: clone(updates), ts: now })
+    // If not live yet, it stays pending and is replayed after bootstrap.
+    if (synced) pubAll(TOPIC_UPDATE, { id, senderId: clientId, updates, ts: now })
+  }
+
+  function publishReplace() {
+    if (!state) return
+    pubAll(TOPIC_UPDATE, { id: newMsgId(), senderId: clientId, replace: state, ts: Date.now() })
+    publishFullState()
   }
 
   return {
@@ -388,18 +483,10 @@ export function createCloudBackend(defaultState) {
     async update(updates) {
       if (!state) state = defaultState()
       const now = Date.now()
-
-      for (const [k, v] of Object.entries(updates)) {
-        if (v && typeof v === 'object' && '__inc' in v) {
-          setPath(state, k, (Number(getPath(state, k)) || 0) + v.__inc)
-        } else {
-          setPath(state, k, clone(resolveNow(v, now)))
-        }
-      }
-
+      applyUpdates(updates, now)
       saveLocal()
       publishDelta(updates, now)
-      publishFullState(state, true)
+      publishFullState()
     },
 
     newKey() {
@@ -410,21 +497,20 @@ export function createCloudBackend(defaultState) {
       if (!state) {
         state = defaultState()
         saveLocal()
-        publishFullState(state, true)
+        publishFullState()
       }
     },
 
     async replaceAll(s) {
       state = clone(s)
+      pending.clear()
       saveLocal()
-      publishFullState(state, true)
+      publishReplace()
     },
 
-    /** Force broadcast current state to all connected devices */
+    /** Force broadcast current state to all connected devices (overwrites theirs) */
     forceSync() {
-      if (state) {
-        publishFullState(state, true)
-      }
+      if (state) publishReplace()
     },
 
     async login(email, password) {
@@ -458,9 +544,7 @@ export function createCloudBackend(defaultState) {
     async setPinHash(h) {
       remotePinHash = h
       storage.set(PIN_KEY, h)
-      if (client && isConnected) {
-        client.publish(TOPIC_PIN, h, { qos: 1, retain: true })
-      }
+      pubAll(TOPIC_PIN, h, true)
     },
   }
 }
